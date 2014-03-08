@@ -1,0 +1,13 @@
+<?php
+
+/**
+ * @file
+ * Install, update, and uninstall functions for Commerce Dunning Testing.
+ */
+
+/**
+ * Implements hook_uninstall().
+ */
+function commerce_dunning_testing_uninstall() {
+  variable_del('commerce_dunning_testing_next_transaction_status');
+}

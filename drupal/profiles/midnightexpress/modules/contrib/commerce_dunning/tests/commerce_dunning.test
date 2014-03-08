@@ -1,0 +1,164 @@
+<?php
+
+/**
+ * @file
+ * Tests for Commerce Dunning.
+ */
+
+class CommerceDunningTestCase extends CommerceBaseTestCase {
+
+  private $order;
+  private $card;
+  private $scheduled_tasks;
+
+  /**
+   * Implements getInfo().
+   */
+  public static function getInfo() {
+    return array(
+      'name' => 'Commerce Dunning',
+      'description' => 'Tests functionality of Commerce Dunning.',
+      'group' => 'Commerce Dunning',
+    );
+  }
+
+  /**
+   * Implements setUp().
+   */
+  public function setUp() {
+    $modules = $this->setUpHelper('all', array('commerce_dunning_defaults', 'commerce_dunning_testing'));
+    parent::setUp($modules);
+
+    // Disable Clean URIs to ensure drupal.org testbot compatibility.
+    variable_set('clean_url', 0);
+
+    // Create an order.
+    $this->order = $this->createDummyOrder();
+
+    // Add a credit card.
+    $this->card = commerce_cardonfile_new(array(
+      'uid' => $this->order->uid,
+      'instance_id' => 'commerce_dunning_testing_payment|commerce_payment_commerce_dunning_testing_payment',
+      'payment_method' => 'commerce_dunning_testing_payment',
+      'remote_id' => $this->randomString(),
+      'card_type' => 'visa',
+      'card_name' => $this->randomName(),
+      'card_number' => '1111',
+      'card_exp_month' => date('n'),
+      'card_exp_year' => date('Y') + 1,
+      'instance_default' => 1,
+    ));
+    commerce_cardonfile_save($this->card);
+
+    // Define identifiers of tasks that are going to be scheduled.
+    $this->scheduled_tasks = array(
+      'dunning-' . $this->order->order_id . '-charge-attempt-3-days',
+      'dunning-' . $this->order->order_id . '-charge-attempt-10-days',
+      'dunning-' . $this->order->order_id . '-charge-attempt-14-days',
+      'dunning-' . $this->order->order_id . '-end-15-days',
+    );
+  }
+
+  /**
+   * Tests the whole Dunning workflow.
+   */
+  public function testDunningWorkflow() {
+    // Set status of next payment transaction to "Insufficient funds".
+    variable_set('commerce_dunning_testing_next_transaction_status', COMMERCE_COF_PROCESS_CODE_METHOD_FAILURE_INSUFFICIENT_FUNDS);
+    // Invoke the Rules component that charges the order.
+    rules_invoke_component('rules_commerce_dunning_charge_card', $this->order);
+    // Assert that further charge attempts and the dunning process ending action
+    // are scheduled.
+    $this->assertDunningTaskScheduled($this->scheduled_tasks);
+    // Assert that the customer has been notified about the soft decline and the
+    // date of next charge attempt was included correctly.
+    $task = commerce_dunning_testing_task_load_by_identifier($this->scheduled_tasks[0]);
+    $this->assertDunningNotification('message_notify_commerce_dunning_soft_declined_card', format_date($task['date']), t('Soft decline notification is sent properly.'));
+    // Assert that status of the order has been set to "Payment failed".
+    $this->assertEqual($this->order->status, 'cardonfile_payment_failed_soft_decline', t('Order status has been set to "Payment failed".'));
+
+    // Set status of next payment transaction to "Hard decline".
+    variable_set('commerce_dunning_testing_next_transaction_status', COMMERCE_COF_PROCESS_CODE_METHOD_FAILURE_HARD_DECLINE);
+    // Evaluate the first scheduled charge attempt.
+    $task = commerce_dunning_testing_task_load_by_identifier($this->scheduled_tasks[0]);
+    commerce_dunning_testing_evaluate_scheduled_task($task);
+    // Assert that the customer has been notified about the hard decline.
+    $this->assertDunningNotification('message_notify_commerce_dunning_hard_declined_card', 're-enter your credit card', t('Hard decline notification is sent properly.'));
+    // Assert that card has been disabled.
+    $card_reloaded = commerce_cardonfile_load($this->card->card_id);
+    $this->assertEqual($card_reloaded->status, 3, t('Card has been disabled.'));
+    // Assert that status of the order has been set to "Payment error".
+    $this->assertEqual($this->order->status, 'cardonfile_payment_error_hard_decline', t('Order status has been set to "Payment error".'));
+
+    // Evaluate the second scheduled charge attempt.
+    $task = commerce_dunning_testing_task_load_by_identifier($this->scheduled_tasks[1]);
+    commerce_dunning_testing_evaluate_scheduled_task($task);
+    // Assert that the customer has been notified about the non-existing card
+    // and that we included the date of final charge attempt properly in the
+    // email.
+    $task = commerce_dunning_testing_task_load_by_identifier($this->scheduled_tasks[2]);
+    $this->assertDunningNotification('message_notify_commerce_dunning_no_card', format_date($task['date']), t('Non-existing card notification is sent properly.'));
+    // Assert that status of the order has been set to "Payment error".
+    $this->assertEqual($this->order->status, 'cardonfile_payment_error_hard_decline', t('Order status has been set to "Payment error".'));
+
+    // Activate the card again.
+    $card_reloaded->status = 1;
+    commerce_cardonfile_save($card_reloaded);
+    // Set status of next payment transaction to "Limit exceeded".
+    variable_set('commerce_dunning_testing_next_transaction_status', COMMERCE_COF_PROCESS_CODE_METHOD_FAILURE_LIMIT_EXCEEDED);
+    // Evaluate the third scheduled charge attempt.
+    $task = commerce_dunning_testing_task_load_by_identifier($this->scheduled_tasks[2]);
+    commerce_dunning_testing_evaluate_scheduled_task($task);
+    // Assert that the customer has been notified about the soft decline and
+    // that we are terminating the service.
+    $this->assertDunningNotification('message_notify_commerce_dunning_soft_declined_card', 'terminated', t('Soft decline notification is sent properly.'));
+    // Assert that status of the order has been set to "Payment failed".
+    $this->assertEqual($this->order->status, 'cardonfile_payment_failed_soft_decline', t('Order status has been set to "Payment failed".'));
+
+    // Evaluate the Dunning process ending task.
+    $task = commerce_dunning_testing_task_load_by_identifier($this->scheduled_tasks[3]);
+    commerce_dunning_testing_evaluate_scheduled_task($task);
+    // Assert that status of the order has been set to "Past due".
+    $this->assertEqual($this->order->status, 'dunning_past_due', t('Order status has been set to "Past due".'));
+  }
+
+  /**
+   * Asserts that a dunning notification is sent to the customer.
+   */
+  protected function assertDunningNotification($email_id, $needle = NULL, $message = NULL) {
+    $last_sent_email = end($this->drupalGetMails());
+    // The first success factor here is sending the right email.
+    $success = $last_sent_email['id'] == $email_id;
+    if (!empty($needle)) {
+      // Then checking if a string appears in the sent email.
+      $success = strpos($last_sent_email['body'], $needle) !== FALSE;
+    }
+    return $this->assertTRUE($success, $message ? $message : t('Notification %message_id has been sent properly.', array('%message_id' => $email_id)));
+  }
+
+  /**
+   * Asserts that dunning tasks are scheduled.
+   */
+  protected function assertDunningTaskScheduled($task_ids) {
+    $not_scheduled_tasks = drupal_map_assoc(($task_ids));
+    foreach (commerce_dunning_get_scheduled_tasks() as $task) {
+      unset($not_scheduled_tasks[$task['identifier']]);
+    }
+    return $this->assert(empty($not_scheduled_tasks), t('Following tasks are scheduled: %task_ids.', array('%task_ids' => implode(', ', $task_ids))));
+  }
+
+  /**
+   * Asserts that dunning tasks are not scheduled.
+   */
+  protected function assertDunningTaskNotScheduled($task_ids) {
+    $task_ids = drupal_map_assoc($task_ids);
+    $scheduled = FALSE;
+    foreach (commerce_dunning_get_scheduled_tasks() as $task) {
+      if (isset($task_ids[$task['identifier']])) {
+        $scheduled = TRUE;
+      }
+    }
+    return $this->assert(!$scheduled, t('Following tasks are not scheduled: %task_ids.', array('%task_ids' => implode(', ', $task_ids))));
+  }
+
+}

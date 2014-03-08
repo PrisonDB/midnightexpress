@@ -1,0 +1,320 @@
+<?php
+
+/**
+ * @file
+ * Provides tools and a payment method for manual testing.
+ */
+
+/**
+ * Implements hook_menu().
+ */
+function commerce_dunning_testing_menu() {
+  $items = array();
+  $items['admin/config/development/dunning-testing'] = array(
+    'title' => 'Commerce Dunning Testing',
+    'description' => 'Manual testing of the functionality of Commerce Dunning.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('commerce_dunning_testing_testing_form'),
+    'access arguments' => array('use manual testing tools'),
+  );
+  $items['admin/config/development/dunning/evaluate-task/%'] = array(
+    'title' => 'Evaluate scheduled task',
+    'page callback' => 'commerce_dunning_testing_evaluate_scheduled_task_page',
+    'page arguments' => array(5),
+    'access arguments' => array('use manual testing tools'),
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_permission().
+ */
+function commerce_dunning_testing_permission() {
+  return array(
+    'use manual testing tools' => array(
+      'title' => t('Use manual testing tools'),
+    ),
+  );
+}
+
+/**
+ * Form builder; manually testing Commerce Dunning's functionality.
+ */
+function commerce_dunning_testing_testing_form($form, &$form_state) {
+  $form = array();
+  $form['fieldset_scheduled_tasks'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Scheduled tasks'),
+  );
+  $task_rows = array();
+  foreach (commerce_dunning_get_scheduled_tasks() as $tid => $task) {
+    $task_rows[] = array(
+      $task['identifier'],
+      $task['config'],
+      format_date($task['date'], 'short'),
+      l(t('Evaluate now'), 'admin/config/development/dunning/evaluate-task/' . $tid),
+    );
+  }
+  if ($task_rows) {
+    $form['fieldset_scheduled_tasks']['scheduled_tasks'] = array(
+      '#theme' => 'table',
+      '#header' => array(
+        t('Identifier'),
+        t('Component name'),
+        t('Scheduled date'),
+        t('Operations')),
+      '#rows' => $task_rows,
+    );
+  }
+  else {
+    $form['fieldset_scheduled_tasks']['no_scheduled_tasks'] = array(
+      '#markup' => t('There are no scheduled tasks.'),
+    );
+  }
+  $form['fieldset_influence_transactions'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Influence transactions'),
+  );
+  $cards = commerce_dunning_testing_load_cards_with_other_payment_methods();
+  if (!empty($cards)) {
+    $options = array();
+    foreach ($cards as $card) {
+      $card_user = user_load($card->uid);
+      $options[$card->card_id] = t('@username — !card_type ending in !number, expires !month/!year', array(
+        '@username' => $card_user->name,
+        '!card_type' => $card->card_type,
+        '!number' => $card->card_number,
+        '!month' => $card->card_exp_month,
+        '!year' => $card->card_exp_year,
+      ));
+    }
+    asort($options);
+    $form['fieldset_influence_transactions']['commerce_dunning_testing_associate_card'] = array(
+      '#type' => 'select',
+      '#title' => t('Associate card'),
+      '#description' => t('Select a card to associate with Commerce Dunning Testing Payment. Warning! The card will not be usable anymore with the payment gateway with which it was originally authorized.'),
+      '#options' => $options,
+      '#empty_option' => t('- None -'),
+    );
+    $form['#submit'][] = 'commerce_dunning_testing_form_submit_associate_card';
+  }
+  $form['fieldset_influence_transactions']['commerce_dunning_testing_next_transaction_status'] = array(
+    '#type' => 'select',
+    '#title' => t('Status of next transaction'),
+    '#description' => t('Select the desired status of the next payment transaction performed with Commerce Dunning Testing Payment.'),
+    '#options' => commerce_payment_transaction_status_options_list(),
+    '#default_value' => variable_get('commerce_dunning_testing_next_transaction_status', COMMERCE_PAYMENT_STATUS_SUCCESS),
+    '#required' => TRUE,
+  );
+  $form = system_settings_form($form);
+  $form['fieldset_influence_transactions']['actions'] = $form['actions'];
+  unset($form['actions']);
+  return $form;
+}
+
+/**
+ * Submit handler; testing form, associate a card with Dunning Testing Payment.
+ */
+function commerce_dunning_testing_form_submit_associate_card($form, &$form_state) {
+  if (!empty($form_state['values']['commerce_dunning_testing_associate_card'])) {
+    $card = commerce_cardonfile_load($form_state['values']['commerce_dunning_testing_associate_card']);
+    $card->payment_method = 'commerce_dunning_testing_payment';
+    $card->instance_id = 'commerce_dunning_testing_payment|commerce_payment_commerce_dunning_testing_payment';
+    $card->status = 1;
+    $card->instance_default = 1;
+    commerce_cardonfile_save($card);
+  }
+}
+
+/**
+ * Page callback: evaluates scheduled task then redirects to the testing page.
+ */
+function commerce_dunning_testing_evaluate_scheduled_task_page($tid) {
+  $task = rules_scheduler_task_load($tid);
+  commerce_dunning_testing_evaluate_scheduled_task($task);
+  drupal_set_message(t('Task %task has been evaluated.', array('%task' => $task['identifier'])));
+  drupal_goto('admin/config/development/dunning-testing');
+}
+
+/**
+ * Loads a Rules scheduler task by its identifier.
+ */
+function commerce_dunning_testing_task_load_by_identifier($identifier) {
+  $result = db_select('rules_scheduler', 'r')
+    ->fields('r')
+    ->condition('identifier', $identifier)
+    ->execute();
+  return $result->fetchAssoc();
+}
+
+/**
+ * Evaluates and delete a scheduled task.
+ */
+function commerce_dunning_testing_evaluate_scheduled_task($task) {
+  if (!is_array($task)) {
+    $task = rules_scheduler_task_load($task);
+  }
+  rules_scheduler_run_task($task);
+  db_delete('rules_scheduler')
+    ->condition('tid', $task['tid'])
+    ->execute();
+}
+
+/**
+ * Implements hook_commerce_payment_method_info().
+ */
+function commerce_dunning_testing_commerce_payment_method_info() {
+  $payment_methods = array();
+  $payment_methods['commerce_dunning_testing_payment'] = array(
+    'title' => t('Commerce Dunning Test Payment'),
+    'description' => t('Payment gateway that allows testing Commerce Dunning.'),
+    'cardonfile' => array(
+      'charge callback' => 'commerce_dunning_testing_payment_cardonfile_charge',
+      'create callback' => 'commerce_dunning_testing_payment_cardonfile_create',
+      'update callback' => 'commerce_dunning_testing_payment_cardonfile_update',
+    ),
+  );
+  return $payment_methods;
+}
+
+/**
+ * Payment method callback: submit form.
+ */
+function commerce_dunning_testing_payment_submit_form($payment_method, $pane_values, $checkout_pane, $order) {
+  module_load_include('inc', 'commerce_payment', 'includes/commerce_payment.credit_card');
+  $fields = array(
+    'type' => array(
+      'visa',
+      'mastercard',
+      'amex',
+    ),
+    'owner' => TRUE,
+    'code' => TRUE,
+  );
+  $default = array(
+    'number' => '4111111111111111',
+  );
+  $form = commerce_payment_credit_card_form($fields, $default);
+  return $form;
+}
+
+/**
+ * Payment method callback: submit form validation.
+ */
+function commerce_dunning_testing_payment_submit_form_validate($payment_method, $pane_form, $pane_values, $order, $form_parents = array()) {
+  if (isset($pane_values['cardonfile']) && is_numeric($pane_values['cardonfile'])) {
+    $card_data = commerce_cardonfile_load($pane_values['cardonfile']);
+    if ($card_data) {
+      // There is no need for validating a card on file, it already happened
+      // when the card had been saved.
+      return NULL;
+    }
+  }
+
+  // Validate credit card fields.
+  module_load_include('inc', 'commerce_payment', 'includes/commerce_payment.credit_card');
+  $settings = array(
+    'form_parents' => array_merge($form_parents, array('credit_card')),
+  );
+  if (!commerce_payment_credit_card_validate($pane_values['credit_card'], $settings)) {
+    return FALSE;
+  }
+}
+
+/**
+ * Payment method callback: submit form submission.
+ */
+function commerce_dunning_testing_payment_submit_form_submit($payment_method, $pane_form, $pane_values, $order, $charge) {
+  $order->data['commerce_dunning_testing_payment'] = $pane_values;
+
+  if (isset($pane_values['cardonfile'])) {
+    // Card on File form elements are added to the payment form.
+    $cardonfile = $pane_values['cardonfile'];
+    $cardonfile_instance_default = $pane_values['cardonfile_instance_default'];
+    $cardonfile_store = $pane_values['credit_card']['cardonfile_store'];
+
+    if (is_numeric($cardonfile)) {
+      // A stored card is selected to use.
+      $card_data = commerce_cardonfile_load($cardonfile);
+    }
+    elseif ($cardonfile == 'new' && $cardonfile_store) {
+      // A new card is used and we are supposed to store it.
+      $card_data = (object) array(
+        'uid' => $order->uid,
+        'payment_method' => $payment_method['method_id'],
+        'instance_id' => $payment_method['instance_id'],
+        'remote_id' => rand(1000, 9999),
+        'card_type' => $pane_values['credit_card']['type'],
+        'card_number' => substr($pane_values['credit_card']['number'], -4),
+        'card_exp_month' => $pane_values['credit_card']['exp_month'],
+        'card_exp_year' => $pane_values['credit_card']['exp_year'],
+        'status' => 1,
+      );
+      commerce_cardonfile_save($card_data);
+    }
+
+    if (isset($card_data)) {
+      if ($cardonfile_instance_default) {
+        // Card in use is designated as default.
+        commerce_cardonfile_set_default_card($card_data->card_id);
+      }
+      return commerce_dunning_testing_payment_cardonfile_charge($payment_method, $card_data, $order, $charge);
+    }
+  }
+
+  return commerce_dunning_testing_payment_transaction($payment_method, $order, $charge);
+}
+
+/**
+ * Creates a payment transaction with the specified transaction status.
+ */
+function commerce_dunning_testing_payment_transaction($payment_method, $order, $charge) {
+  $transaction_status_overall = TRUE;
+  $transaction_status = variable_get('commerce_dunning_testing_next_transaction_status', COMMERCE_PAYMENT_STATUS_SUCCESS);
+  if (!in_array($transaction_status, array(COMMERCE_PAYMENT_STATUS_SUCCESS, COMMERCE_PAYMENT_STATUS_PENDING))) {
+    // Consider the transaction failed unless the selected status is "success"
+    // or "pending".
+    $transaction_status_overall = FALSE;
+  }
+
+  $transaction = commerce_payment_transaction_new('commerce_dunning_testing_payment', $order->order_id);
+  $transaction->instance_id = $payment_method['instance_id'];
+  $transaction->amount = $transaction_status_overall ? $charge['amount'] : 0;
+  $transaction->currency_code = $charge['currency_code'];
+  $transaction->status = $transaction_status;
+  $transaction->remote_id = rand(1000, 9999);
+  $transaction->message = 'Name: @name. Transaction status: !status.';
+  $transaction->message_variables = array(
+    '@name' => 'Commerce Dunning Test Payment',
+    '!status' => $transaction_status,
+  );
+
+  commerce_payment_transaction_save($transaction);
+  return $transaction_status;
+}
+
+/**
+ * Card on File callback: charge credit card.
+ */
+function commerce_dunning_testing_payment_cardonfile_charge($payment_method, $card_data, $order, $charge = NULL) {
+  if (!isset($charge)) {
+    $wrapper = entity_metadata_wrapper('commerce_order', $order);
+    $charge = commerce_line_items_total($wrapper->commerce_line_items);
+  }
+  return commerce_dunning_testing_payment_transaction($payment_method, $order, $charge);
+}
+
+/**
+ * Card on File callback: add new credit card.
+ */
+function commerce_dunning_testing_payment_cardonfile_create($form, $form_state, $payment_method, $card_data) {
+  $card_data->remote_id = rand(1000, 9999);
+  return $card_data;
+}
+
+/**
+ * Card on File callback: update credit card.
+ */
+function commerce_dunning_testing_payment_cardonfile_update($form, $form_state, $payment_method, $card_data) {
+  return TRUE;
+}

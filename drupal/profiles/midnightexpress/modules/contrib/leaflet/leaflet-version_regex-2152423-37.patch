@@ -1,0 +1,13 @@
+diff --git a/leaflet.module b/leaflet.module
+index dabae4f..df84647 100644
+--- a/leaflet.module
++++ b/leaflet.module
+@@ -31,7 +31,7 @@ function leaflet_libraries_info() {
+     // .7: version="0.7"
+     'version arguments' => array(
+       'file' => 'leaflet.js',
+-      'pattern' => '/version="([\d+\.]*\d+)"/',
++      'pattern' => '/version\s*=\s*["\']([\d+\.]*\d+)["\']/',
+     ),
+     'files' => array(
+       'js' => array(

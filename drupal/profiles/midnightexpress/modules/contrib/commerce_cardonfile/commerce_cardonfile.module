@@ -1,0 +1,1625 @@
+<?php
+
+/**
+ * @file
+ * Supports card on file functionality for credit card payment methods by
+ * associating card data reference IDs from payment gateways with user accounts.
+ */
+
+// -----------------------------------------------------------------------
+// Constants
+
+// Card on file process status codes
+define('COMMERCE_COF_PROCESS_CODE_INSUFFICIENT_DATA', 'insufficient');
+define('COMMERCE_COF_PROCESS_CODE_CARD_NA', 'card_na');
+define('COMMERCE_COF_PROCESS_CODE_CARD_NOT_CHARGEABLE', 'card_not_chargeable');
+define('COMMERCE_COF_PROCESS_CODE_CARD_OK', 'card_ok');
+define('COMMERCE_COF_PROCESS_CODE_METHOD_EMPTY', 'no_method');
+define('COMMERCE_COF_PROCESS_CODE_METHOD_NOT_CAPABLE', 'method_not_capable');
+define('COMMERCE_COF_PROCESS_CODE_METHOD_SUCCESS', 'method_success');
+define('COMMERCE_COF_PROCESS_CODE_CARD_EXPIRED', 'card_expired');
+// For the sake of backwards compatibility, we leave this generic failure status
+// here.
+define('COMMERCE_COF_PROCESS_CODE_METHOD_FAILURE', 'method_failure');
+define('COMMERCE_COF_PROCESS_CODE_METHOD_FAILURE_INSUFFICIENT_FUNDS', 'method_failure_insufficient_funds');
+define('COMMERCE_COF_PROCESS_CODE_METHOD_FAILURE_LIMIT_EXCEEDED', 'method_failure_limit_exceeded');
+define('COMMERCE_COF_PROCESS_CODE_METHOD_FAILURE_CALL_ISSUER', 'method_failure_call_issuer');
+define('COMMERCE_COF_PROCESS_CODE_METHOD_FAILURE_TEMPORARY_HOLD', 'method_failure_temporary_hold');
+define('COMMERCE_COF_PROCESS_CODE_METHOD_FAILURE_GENERIC_DECLINE', 'method_failure_generic_decline');
+define('COMMERCE_COF_PROCESS_CODE_METHOD_FAILURE_HARD_DECLINE', 'method_failure_hard_decline');
+define('COMMERCE_COF_PROCESS_CODE_METHOD_FAILURE_GATEWAY_ERROR', 'method_failure_gateway_error');
+define('COMMERCE_COF_PROCESS_CODE_METHOD_FAILURE_GATEWAY_UNAVAILABLE', 'method_failure_gateway_unavailable');
+define('COMMERCE_COF_PROCESS_CODE_METHOD_FAILURE_GATEWAY_CONFIGURATION_ERROR', 'method_failure_gateway_configuration_error');
+
+/**
+ * Implements hook_menu().
+ */
+function commerce_cardonfile_menu() {
+  $items = array();
+
+  $items['admin/commerce/config/cardonfile'] = array(
+    'title' => 'Card on file settings',
+    'description' => 'Configure your card on file settings.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('commerce_cardonfile_settings_form'),
+    'access arguments' => array('configure cardonfile'),
+    'file' => 'includes/commerce_cardonfile.admin.inc',
+  );
+  $items['admin/commerce/config/cardonfile/settings'] = array(
+    'title' => 'Settings',
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'weight' => -10,
+  );
+
+  // Card operations links.
+  $items['user/%user/cards/%commerce_cardonfile'] = array(
+    'title callback' => 'commerce_cardonfile_card_title',
+    'title arguments' => array(3),
+    'page callback' => 'commerce_cardonfile_card_view',
+    'page arguments' => array(3, 'customer'),
+    'access callback' => 'commerce_cardonfile_access',
+    'access arguments' => array('view', 3),
+    'file' => 'includes/commerce_cardonfile.pages.inc',
+  );
+
+  // Note that this tab is hidden by its access callback by default. To enable a
+  // view page, implement hook_menu_alter() and unset this tab's access callback
+  // to fallback to the parent menu item's access callback.
+  $items['user/%user/cards/%commerce_cardonfile/view'] = array(
+    'title' => 'View',
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'weight' => -10,
+    'context' => MENU_CONTEXT_PAGE | MENU_CONTEXT_INLINE,
+    'access callback' => 'commerce_cardonfile_card_view_access',
+  );
+
+  // create paths for each payment method
+  $create_implements = commerce_cardonfile_payment_method_implements('create callback');
+  foreach ($create_implements as $method_id => $method_function) {
+    $payment_method_instances = _commerce_cardonfile_payment_method_instances($method_id, TRUE);
+    if (empty($payment_method_instances)) {
+      continue;
+    }
+
+    foreach ($payment_method_instances as $instance_id => $payment_method) {
+      $new_card_data = commerce_cardonfile_new(array(
+        'instance_id' => $instance_id,
+        'payment_method' => $payment_method['method_id'],
+      ));
+      $items['user/%user/cards/add/' . drupal_hash_base64($instance_id)] = array(
+        'title' => 'Add a card for payments with !name',
+        'title arguments' => array('!name' => $payment_method['display_title']),
+        'page callback' => 'commerce_cardonfile_card_form_page',
+        'page arguments' => array('create', $new_card_data, 1),
+        'access callback' => 'commerce_cardonfile_access',
+        'access arguments' => array('create', $new_card_data, 1),
+        'type' => MENU_LOCAL_ACTION,
+        'file' => 'includes/commerce_cardonfile.pages.inc',
+      );
+    }
+  }
+
+  $items['user/%user/cards/%commerce_cardonfile/edit'] = array(
+    'title' => 'Edit',
+    'description' => 'Update a stored payment method.',
+    'page callback' => 'commerce_cardonfile_card_form_page',
+    'page arguments' => array('update', 3, 1),
+    'access callback' => 'commerce_cardonfile_access',
+    'access arguments' => array('update', 3),
+    'type' => MENU_LOCAL_TASK,
+    'context' => MENU_CONTEXT_PAGE | MENU_CONTEXT_INLINE,
+    'file' => 'includes/commerce_cardonfile.pages.inc',
+  );
+
+  $items['user/%user/cards/%commerce_cardonfile/delete'] = array(
+    'title' => 'Delete',
+    'description' => 'Delete a stored payment method.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('commerce_cardonfile_delete_form', 3),
+    'access callback' => 'commerce_cardonfile_access',
+    'access arguments' => array('delete', 3),
+    'type' => MENU_LOCAL_TASK,
+    'context' => MENU_CONTEXT_INLINE,
+    'weight' => 5,
+    'file' => 'includes/commerce_cardonfile.pages.inc',
+  );
+
+  return $items;
+}
+
+/**
+ * Access callback: hide the "view" tab for card data by default.
+ */
+function commerce_cardonfile_card_view_access() {
+  return FALSE;
+}
+
+/**
+ * Implements hook_admin_paths().
+ */
+function commerce_cardonfile_admin_paths() {
+  // The user module defines user/*/edit as an admin path, so we must explicitly
+  // declare user/*/cards/* as non-admin paths.
+  $paths = array(
+    'user/*/cards/*' => FALSE,
+  );
+
+  return $paths;
+}
+
+/**
+ * Implements of hook_entity_info().
+ */
+function commerce_cardonfile_entity_info() {
+  $data = array();
+
+  $data['commerce_cardonfile'] = array(
+    'label' => t('Commerce Card Data'),
+    'entity class' => 'Entity',
+    'controller class' => 'EntityAPIController',
+    'base table' => 'commerce_cardonfile',
+    'locking mode' => 'pessimistic',
+    'fieldable' => TRUE,
+    'entity keys' => array(
+      'id' => 'card_id',
+      'label' => 'card_id',
+    ),
+    'bundles' => array(
+      'commerce_cardonfile' => array(
+        'label' => t('Card on File'),
+        'admin' => array(
+          'path' => 'admin/commerce/config/cardonfile',
+          'access arguments' => array('configure cardonfile'),
+        ),
+      ),
+    ),
+    'load hook' => 'commerce_cardonfile_load',
+    'view modes' => array(
+      'administrator' => array(
+        'label' => t('Administrator'),
+        'custom settings' => FALSE,
+      ),
+      'customer' => array(
+        'label' => t('Customer'),
+        'custom settings' => FALSE,
+      ),
+    ),
+    'admin' => array(
+      'path' => 'admin/commerce/config/cardonfile',
+      'access arguments' => array('configure cardonfile'),
+    ),
+    'access callback' => 'commerce_cardonfile_access',
+    'token type' => 'commerce-cardonfile',
+    'metadata controller class' => '',
+    'permission labels' => array(
+      'singular' => t('card data'),
+      'plural' => t('card data'),
+    ),
+  );
+
+  return $data;
+}
+
+/**
+ * Implements hook_commerce_order_status_info().
+ */
+function commerce_cardonfile_commerce_order_status_info() {
+  $order_statuses = array();
+
+  // Create a new status before Pending so we can generate orders in recurring
+  // processes without interfering with the current cart for the user.
+  $order_statuses['cardonfile_charged'] = array(
+    'name' => 'cardonfile_charged',
+    'title' => t('Charged'),
+    'state' => 'pending',
+    'weight' => 1,
+  );
+
+  // Status for soft declined transactions.
+  $order_statuses['cardonfile_payment_failed_soft_decline'] = array(
+    'name' => 'cardonfile_payment_failed_soft_decline',
+    'title' => t('Payment failed'),
+    'state' => 'pending',
+    'weight' => -2,
+  );
+
+  // Status for hard declined transactions.
+  $order_statuses['cardonfile_payment_error_hard_decline'] = array(
+    'name' => 'cardonfile_payment_error_hard_decline',
+    'title' => t('Payment error'),
+    'state' => 'pending',
+    'weight' => -3,
+  );
+
+  return $order_statuses;
+}
+
+/**
+ * Returns a list of cof data statuses
+ */
+function commerce_cardonfile_statuses() {
+  $statuses = array(
+    0 => t('Disabled'),
+    1 => t('Active'),
+    2 => t('Not deletable'),
+    3 => t('Declined'),
+  );
+
+  return $statuses;
+}
+
+/**
+ * Returns the human readable title of any or all data statuses.
+ *
+ * @param $name
+ *   Optional parameter specifying the name of the status whose title
+ *     to return.
+ *
+ * @return
+ *   Either an array of all status titles keyed by the status_id or a
+ *     string containing the human readable title for the specified status. If a
+ *     status is specified that does not exist, this function returns FALSE.
+ */
+function commerce_cardonfile_status_get_title($name = NULL) {
+  $statuses = commerce_cardonfile_statuses();
+
+  // Return a status title if specified and it exists.
+  if (!empty($name)) {
+    if (isset($statuses[$name])) {
+      return $statuses[$name];
+    }
+    else {
+      // Return FALSE if it does not exist.
+      return FALSE;
+    }
+  }
+
+  // Otherwise return all titles.
+  return $statuses;
+}
+
+/**
+ * Wraps commerce_cardonfile_status_get_title().
+ */
+function commerce_cardonfile_status_options_list() {
+  return commerce_cardonfile_status_get_title();
+}
+
+/**
+ * Implements hook_hook_info().
+ */
+function commerce_cardonfile_hook_info() {
+  $base_info = array(
+    'group' => 'commerce',
+  );
+
+  $hooks = array(
+    'commerce_cardonfile_insert' => $base_info,
+    'commerce_cardonfile_update' => $base_info,
+    'commerce_cardonfile_disable' => $base_info,
+    'commerce_cardonfile_delete' => $base_info,
+    'commerce_cardonfile_can_delete' => $base_info,
+    'commerce_cardonfile_chargeable_cards' => $base_info,
+    'commerce_cardonfile_checkout_pane_form_alter' => $base_info,
+  );
+
+  return $hooks;
+}
+
+/**
+ * Implements hook_commerce_cardonfile_presave().
+ */
+function commerce_cardonfile_commerce_cardonfile_presave($card_data) {
+  // Set the status back to `Active` when updating a card with `Declined`
+  // status. Also check whether the information has actually changed (only
+  // expiration date can be modified).
+  if (!$card_data->is_new && $card_data->status == 3 && ((int) $card_data->original->card_exp_month != (int) $card_data->card_exp_month || (int) $card_data->original->card_exp_year != (int) $card_data->card_exp_year)) {
+    $card_data->status = 1;
+  }
+}
+
+/**
+ * Implements hook_views_api().
+ */
+function commerce_cardonfile_views_api() {
+  return array(
+    'api' => 3,
+    'path' => drupal_get_path('module', 'commerce_cardonfile') . '/includes/views',
+  );
+}
+
+/**
+ * Implements hook_permission().
+ */
+function commerce_cardonfile_permission() {
+  return array(
+    'configure cardonfile' => array(
+      'title' => t('Configure Card on File'),
+      'description' => t('Update the Card on File configuration in the Store back end.'),
+      'restrict access' => TRUE,
+    ),
+    'administer card data' => array(
+      'title' => t('Administer card data'),
+      'description' => t("Access and update any user's stored card data."),
+      'restrict access' => TRUE,
+    ),
+    'view any card data' => array(
+      'title' => t('View any card data'),
+      'restrict access' => TRUE,
+    ),
+    'view own card data' => array(
+      'title' => t('View own card data'),
+    ),
+    'create any card data' => array(
+      'title' => t('Create any card data'),
+      'restrict access' => TRUE,
+    ),
+    'create own card data' => array(
+      'title' => t('Create own card data'),
+    ),
+    'edit any card data' => array(
+      'title' => t('Edit any card data'),
+      'restrict access' => TRUE,
+    ),
+    'edit own card data' => array(
+      'title' => t('Edit own card data'),
+    ),
+    'delete any card data' => array(
+      'title' => t('Delete any card data'),
+      'restrict access' => TRUE,
+    ),
+    'delete own card data' => array(
+      'title' => t('Delete own card data'),
+    ),
+  );
+}
+
+/**
+ * Determines if the current user has access to perform an operation on the
+ * given card data array.
+ *
+ * @param $op
+ *   The operation being performed. One of 'view', 'edit', 'update', 'manage',
+ *   'create' or 'delete'.
+ * @param $card_data
+ *   The card data array
+ * @param $account
+ *   The user account for the card access
+ *
+ * @return
+ *   TRUE if the current user has access
+ */
+function commerce_cardonfile_access($op = 'view', $card_data = NULL, $account = NULL) {
+  global $user;
+
+  $account = isset($account) ? $account : $user;
+
+  // resolve operation
+  if ($op == 'manage' || $op == 'update') {
+    $op = 'edit';
+  }
+
+  // load payment method instance and rule
+  $payment_method = array();
+  $payment_rule = NULL;
+
+  if (!empty($card_data->instance_id)) {
+    $payment_method = commerce_payment_method_instance_load($card_data->instance_id);
+    if (!empty($payment_method)) {
+      // Explode the method key into its component parts.
+      list($payment_method_id, $instance_rule_name) = explode('|', $payment_method['instance_id']);
+      $payment_rule = rules_config_load($instance_rule_name);
+    }
+  }
+
+  // DENY for operations that require a payment method callback
+  if (empty($payment_method) && $op != 'view') {
+    return FALSE;
+  }
+
+  // Operation specific access checks
+  $op_callback = TRUE;
+
+  switch ($op) {
+    case 'edit':
+      // set operation callback
+      $op_callback = commerce_cardonfile_payment_method_callback($payment_method, 'update callback');
+      break;
+
+    case 'create':
+      // set operation callback
+      $op_callback = commerce_cardonfile_payment_method_callback($payment_method, 'create callback');
+
+      // DENY if payment rule has been disabled
+      if ($op_callback && !empty($payment_rule) && empty($payment_rule->active)) {
+        return FALSE;
+      }
+      break;
+
+    case 'delete':
+      // set operation callback
+      $op_callback = commerce_cardonfile_payment_method_callback($payment_method, 'delete callback');
+      break;
+
+    default:
+      $op_callback = TRUE;
+      break;
+  }
+
+  // ALLOW access for any user with administer permission.
+  if (user_access('administer card data') || user_access("$op any card data")) {
+    return TRUE;
+  }
+
+  // ALLOW access to create new cards to any user with the 'create own card data'
+  // permission when they are accessing to their own profile.
+  if ($op == 'create' && user_access('create own card data') && $account->uid == $user->uid) {
+    return TRUE;
+  }
+
+  // DENY if callback does NOT exist for specific operations
+  if (empty($op_callback)) {
+    return FALSE;
+  }
+
+  // ALLOW access for users with permission to manage their own card data.
+  if ($op != 'create' && user_access("$op own card data") && !empty($card_data->uid) && $account->uid == $card_data->uid) {
+    return TRUE;
+  }
+
+  // DENY by default
+  return FALSE;
+}
+
+/**
+ * Determines if the current user has access to the account's stored cards.
+ */
+function commerce_cardonfile_user_access($account) {
+  global $user;
+
+  if (user_access('administer card data') || user_access('view any card data')) {
+    // Grant access for any user with administer permission or view permission
+    // to any cards.
+    return TRUE;
+  }
+  elseif ($account->uid != $user->uid) {
+    // Otherwise deny the access if the account doesn't belong to the currently
+    // logged in user.
+    return FALSE;
+  }
+
+  // create a stub data array for access checks
+  $card_data_stub = commerce_cardonfile_new(array(
+    'uid' => $account->uid,
+  ));
+
+  // DENY if the user DOES NOT have view access
+  if (!commerce_cardonfile_access('view', $card_data_stub, $account)) {
+    return FALSE;
+  }
+
+  // load active cards
+  $stored_cards = commerce_cardonfile_load_multiple_by_uid($account->uid);
+
+  // if no cards, then check create access
+  if (empty($stored_cards)) {
+    $create_implements = commerce_cardonfile_payment_method_implements('create callback');
+    foreach ($create_implements as $method_id => $method_function) {
+      $payment_method_instances = _commerce_cardonfile_payment_method_instances($method_id, FALSE);
+      if (empty($payment_method_instances)) {
+        continue;
+      }
+
+      foreach ($payment_method_instances as $instance_id => $payment_method) {
+        $card_data_stub->instance_id = $instance_id;
+        if (commerce_cardonfile_access('create', $card_data_stub, $account)) {
+          return TRUE;
+        }
+      }
+    }
+
+    // DENY if the user DOES NOT have create access AND NO cards on file
+    return FALSE;
+  }
+
+  // ALLOW by default
+  return TRUE;
+}
+
+/**
+ * Redirects from a would be card data page to the user's stored payment methods tab.
+ */
+function commerce_cardonfile_redirect_to_user($account) {
+  drupal_goto('user/' . $account->uid . '/cards');
+}
+
+/**
+ * Implements hook_form_alter().
+ *
+ * This implementation alters any checkout form looking for the payment pane
+ * and seeing if its details are currently for a credit card payment method. If
+ * so, it adds the necessary form elements for Card on File payment, including a
+ * select element to use previously stored credit card information and a
+ * checkbox on the credit card data entry form to store the given credit card on
+ * file for future usage.
+ */
+function commerce_cardonfile_form_alter(&$form, &$form_state, $form_id) {
+  // Exit if the current form ID is for a checkout page form...
+  if (strpos($form_id, 'commerce_checkout_form_') !== 0 ||
+      !commerce_checkout_page_load(substr($form_id, 23))) {
+    return;
+  }
+
+  // Exit if the current page's form does no include the payment checkout pane...
+  if (empty($form['commerce_payment'])) {
+    return;
+  }
+
+  // DENY if user is not defined or is anonymous
+  if (!isset($form_state['account']) || empty($form_state['account']->uid)) {
+    return;
+  }
+
+  // Exit if no payment method instance id
+  if (empty($form['commerce_payment']['payment_method']['#default_value'])) {
+    return;
+  }
+
+  // Extact payment method instance id
+  $instance_id = $form['commerce_payment']['payment_method']['#default_value'];
+
+  // Check to see if the currently selected payment method is Card on File
+  // enabled (via the cardonfile boolean in its info array).
+  $payment_method = commerce_payment_method_instance_load($instance_id);
+
+  // Exit if payment method is not capable of Card on File, or Card on File
+  // functionality is disabled in the payment method instance.
+  if (!_commerce_cardonfile_capable_payment_method_check($payment_method) || (isset($payment_method['settings']['cardonfile']) && !$payment_method['settings']['cardonfile'])) {
+    return;
+  }
+
+  // For onsite payment methods add a checkbox to the credit card
+  // details container to store the credit card for future use.
+  if (!$payment_method['offsite']) {
+    $storage = variable_get('commerce_cardonfile_storage', 'opt-in');
+
+    if (in_array($storage, array('opt-in', 'opt-out'))) {
+      $form['commerce_payment']['payment_details']['credit_card']['cardonfile_store'] = array(
+        '#type' => 'checkbox',
+        '#title' => t('Store this credit card on file for future use.'),
+        '#default_value' => $storage == 'opt-out',
+      );
+    }
+    else {
+      $form['commerce_payment']['payment_details']['credit_card']['cardonfile_store'] = array(
+        '#type' => 'value',
+        '#value' => TRUE,
+      );
+    }
+
+  }
+
+  // Load existing active cards for the payment method instance and user.
+  $stored_cards = commerce_cardonfile_load_multiple_by_uid($form_state['account']->uid, $payment_method['instance_id']);
+
+  // Build options form
+  $cardonfile_options_form = array();
+  $instance_default_card_id = NULL;
+
+  // If have stored cards ...
+  if (!empty($stored_cards)) {
+    $valid_cards = array_filter($stored_cards, 'commerce_cardonfile_validate_card_expiration');
+
+    // If have un-expired cards ...
+    if (!empty($valid_cards)) {
+      // get options list with labels
+      $card_option_element_type = variable_get('commerce_cardonfile_selector', 'radios');
+      $card_options = commerce_cardonfile_element_options_list($valid_cards, $card_option_element_type);
+
+      // determine default option
+      $card_options_default_value = key($card_options);
+      foreach (array_keys($card_options) as $card_id) {
+        if (isset($valid_cards[$card_id]) && !empty($valid_cards[$card_id]->instance_default)) {
+          $card_options_default_value = $instance_default_card_id = $card_id;
+
+          // move instance default to the top of the list
+          $card_option_label = $card_options[$card_id];
+          unset($card_options[$card_id]);
+          $card_options = array($card_id => $card_option_label) + $card_options;
+          break;
+        }
+      }
+
+      // create options element
+      $cardonfile_options_form = array(
+        '#type' => $card_option_element_type,
+        '#title' => t('Select a stored card'),
+        '#options' => $card_options,
+        '#default_value' => $card_options_default_value,
+        '#weight' => -10,
+        '#ajax' => array(
+          'callback' => 'commerce_payment_pane_checkout_form_details_refresh',
+          'wrapper' => 'payment-details',
+        ),
+      );
+    }
+  }
+
+  // update form with options
+  if (!empty($cardonfile_options_form)) {
+    $form['commerce_payment']['payment_details']['cardonfile'] = $cardonfile_options_form;
+
+    // Add the CSS to hide a sole credit card icon if specified.
+    if (variable_get('commerce_cardonfile_hide_cc_radio_button', TRUE)) {
+      if (count($form['commerce_payment']['payment_method']['#options']) == 1) {
+        $form['commerce_payment']['payment_method']['#attached']['css'][] = drupal_get_path('module', 'commerce_cardonfile') . '/theme/commerce_cardonfile.checkout.css';
+      }
+    }
+
+    // If the current value for the card selection element is not to use
+    // a different credit card, then hide the credit card form elements.
+    if (empty($form_state['values']['commerce_payment']['payment_details']['cardonfile']) || $form_state['values']['commerce_payment']['payment_details']['cardonfile'] !== 'new') {
+      $form['commerce_payment']['payment_details']['credit_card']['#access'] = FALSE;
+    }
+  }
+  else {
+    $form['commerce_payment']['payment_details']['cardonfile'] = array(
+      '#type' => 'value',
+      '#value' => 'new',
+    );
+  }
+
+  // Add mark as default element
+  $instance_default_default_value = 0;
+  if (!empty($instance_default_card_id)) {
+    if (empty($form_state['values']) ||
+      (!empty($form_state['values']['commerce_payment']['payment_details']['cardonfile']) &&
+      $form_state['values']['commerce_payment']['payment_details']['cardonfile'] == $instance_default_card_id)) {
+      $instance_default_default_value = 1;
+    }
+  }
+
+  $force_instance_default = empty($stored_cards);
+  $form['commerce_payment']['payment_details']['cardonfile_instance_default'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Set as your default card'),
+    '#default_value' => $instance_default_default_value || $force_instance_default,
+    '#access' => !$instance_default_default_value,
+    '#disabled' => $force_instance_default,
+    '#states' => array(
+      'invisible' => array(
+        ':input[name$="[cardonfile]"]' => array('value' => 'new'),
+      ),
+      'visible' => array(
+        ':input[name$="[cardonfile_store]"]' => array('checked' => TRUE),
+      ),
+    ),
+  );
+
+  // Allow others to alter this alter
+  drupal_alter('commerce_cardonfile_checkout_pane_form', $form['commerce_payment']['payment_details'], $form);
+
+  // Add submit handler
+  if (isset($form['buttons']['continue'])) {
+    $form['buttons']['continue']['#submit'][] = 'commerce_cardonfile_commerce_checkout_form_submit';
+  }
+}
+
+/**
+ * Checkout form submit callback to process card on file options
+ */
+function commerce_cardonfile_commerce_checkout_form_submit($form, &$form_state) {
+  if (!isset($form_state['order']) || empty($form_state['values']['commerce_payment'])) {
+    return;
+  }
+
+  $pane_values = &$form_state['values']['commerce_payment'];
+  $store_card = !empty($pane_values['payment_details']['credit_card']['cardonfile_store']);
+
+  // Exit if no card selection
+  if (empty($pane_values['payment_details']['cardonfile'])) {
+    return;
+  }
+
+  // Load a fresh copy of the order stored in the form.
+  $order = commerce_order_load($form_state['order']->order_id);
+  $order_wrapper = entity_metadata_wrapper('commerce_order', $order);
+
+  $account = $form_state['account'];
+  $instance_id = $pane_values['payment_method'];
+
+  // get card on file value
+  $card_id_selected = NULL;
+  if ($pane_values['payment_details']['cardonfile'] != 'new') {
+    $card_id_selected = intval($pane_values['payment_details']['cardonfile']);
+  }
+
+  // Submit actions for card selected
+  if (!empty($card_id_selected)) {
+    // Mark as default
+    if (!empty($pane_values['payment_details']['cardonfile_instance_default'])) {
+      commerce_cardonfile_set_default_card($card_id_selected);
+    }
+
+  }
+}
+
+/**
+ * Returns an options array for selecting a card on file during checkout
+ *
+ * @param $stored_cards
+ *   An array of stored card data arrays keyed by card_id.
+ * @param $element_type
+ *   The form element the options array will be for, 'radios' or 'select'.
+ * @param $different
+ *   Add an option to use a different credit card.
+ *
+ * @return
+ *   An options array for selecting a card on file.
+ */
+function commerce_cardonfile_element_options_list($stored_cards, $element_type = 'radios', $different = TRUE) {
+  // Build an options array of stored credit cards.
+  $options = array();
+
+  // Load the credit card helper functions from the Payment module.
+  commerce_cardonfile_load_credit_card_helpers();
+  $card_types = commerce_payment_credit_card_types();
+
+  foreach ($stored_cards as $card_id => $card_data) {
+    $replacements = array(
+      '@card_type' => !empty($card_types[$card_data->card_type]) ? $card_types[$card_data->card_type] : $card_data->card_type,
+      '@card_number' => $card_data->card_number,
+      '@card_exp_month' => str_pad($card_data->card_exp_month, 2, '0', STR_PAD_LEFT),
+      '@card_exp_year' => $card_data->card_exp_year,
+      '@instance_default' => !empty($card_data->instance_default) ? t('(default)') : '',
+      );
+    $options[$card_id] = t('@card_type ending @card_number, Expires @card_exp_month/@card_exp_year @instance_default', $replacements);;
+  }
+
+  // Add an option to use a different credit card if specified.
+  if ($different) {
+    $options['new'] = t('Use a different credit card');
+  }
+
+  return $options;
+}
+
+/**
+ * Loads stored card data by ID.
+ *
+ * @param $card_id
+ *   The local ID of the stored card data to load.
+ *
+ * @return
+ *   An array containing the specified card data or FALSE if the specified card
+ *   data does not exist.
+ */
+function commerce_cardonfile_load($card_id) {
+  return entity_load_single('commerce_cardonfile', $card_id);
+}
+
+/**
+ * Loads stored card data.
+ *
+ * @param $card_ids
+ *   An array of card ids to load
+ * @param $reset
+ *   Whether to reset the internal transaction loading cache.
+ *
+ * @return
+ *   The cardonfile entities
+ */
+function commerce_cardonfile_load_multiple($card_ids = array(), $reset = FALSE) {
+  return entity_load('commerce_cardonfile', $card_ids, array(), $reset);
+}
+
+/**
+ * Loads stored card data for a user by payment method instance.
+ * @param unknown $uid
+ * @param string $instance_id
+ * @param string $active
+ * @return Ambigous <The, An>|boolean
+ */
+function commerce_cardonfile_load_multiple_by_uid($uid, $instance_id = NULL, $active = TRUE) {
+
+  $return = array();
+  $query = new EntityFieldQuery();
+  $query->entityCondition('entity_type', 'commerce_cardonfile')
+  ->propertyCondition('uid', $uid);
+
+  if (!empty($instance_id)) {
+    $query->propertyCondition('instance_id', $instance_id);
+  }
+
+  if ($active) {
+    $query->propertyCondition('status', TRUE);
+  }
+
+  $result = $query->execute();
+
+  if (isset($result['commerce_cardonfile'])) {
+    return commerce_cardonfile_load_multiple(array_keys($result['commerce_cardonfile']));
+  }
+  else {
+    return FALSE;
+  }
+}
+
+/**
+ * Loads stored card data by remote id.
+ * @param unknown $remote_id
+ * @return Ambigous <The, An>|boolean
+ */
+function commerce_cardonfile_load_multiple_by_remote_id($remote_id) {
+  $return = array();
+  $query = new EntityFieldQuery();
+  $query->entityCondition('entity_type', 'commerce_cardonfile')
+  ->propertyCondition('remote_id', $remote_id);
+
+  $result = $query->execute();
+
+  if (isset($result['commerce_cardonfile'])) {
+    return commerce_cardonfile_load_multiple(array_keys($result['commerce_cardonfile']));
+  }
+  else {
+    return FALSE;
+  }
+}
+
+/**
+ * Load the owners default cards
+ *
+ * @param $owner
+ *   The user object of the owner
+ * @param $instance_id
+ *   The payment method instance id
+ *
+ * @return
+ *   The default card or FALSE if no default card set.
+ */
+function commerce_cardonfile_load_user_default_cards($uid, $instance_id = NULL) {
+
+  $return = array();
+  $query = new EntityFieldQuery();
+  $query->entityCondition('entity_type', 'commerce_cardonfile')
+  ->propertyCondition('uid', $uid);
+
+  if (!empty($instance_id)) {
+    $query->propertyCondition('instance_id', $instance_id);
+  }
+
+  $query->propertyCondition('status', TRUE);
+  $query->propertyCondition('instance_default', TRUE);
+
+  $result = $query->execute();
+
+  if (isset($result['commerce_cardonfile'])) {
+    return commerce_cardonfile_load_multiple(array_keys($result['commerce_cardonfile']));
+  }
+  else {
+    return FALSE;
+  }
+}
+
+/**
+ * Returns an initialized Commerce Card on File entity.
+ *
+ * @param array $values
+ * @return Ambigous <A, boolean>
+ */
+function commerce_cardonfile_new(array $values = array()) {
+  $values += array(
+    'card_id' => NULL,
+    'uid' => 0,
+    'payment_method' => '',
+    'instance_id' => '',
+    'remote_id' => '',
+    'card_type' => '',
+    'card_name' => '',
+    'card_number' => '',
+    'card_exp_month' => '',
+    'card_exp_year' => '',
+    'status' => 1,
+    'created' => REQUEST_TIME,
+  );
+
+  return entity_create('commerce_cardonfile', $values);
+}
+
+/**
+ * Saves an array of card data.
+ *
+ * @param $card_data
+ *   A cardonfile object
+ *
+ * @return
+ *
+ */
+function commerce_cardonfile_save($card_data, $billing_profile = NULL) {
+
+  if (!empty($billing_profile)) {
+
+    // Clone the order profile to use on the Card on File entity.
+    unset($billing_profile->profile_id);
+    unset($billing_profile->revision_id);
+    commerce_customer_profile_save($billing_profile);
+
+    // Add the billing profile to the card on file.
+    $card_data->commerce_cardonfile_profile[LANGUAGE_NONE][0]['profile_id'] = $billing_profile->profile_id;
+  }
+
+  return entity_save('commerce_cardonfile', $card_data);
+}
+
+/**
+ * Set a card's instance default value
+ */
+function commerce_cardonfile_set_default_card($card_id, $instance_default_value = 1) {
+  if (!empty($card_id)) {
+    if ($card = commerce_cardonfile_load($card_id)) {
+      $query = new EntityFieldQuery();
+      $query->entityCondition('entity_type', 'commerce_cardonfile');
+      $query->propertyCondition('instance_id', $card->instance_id);
+      $query->propertyCondition('uid', $card->uid);
+
+      $result = $query->execute();
+
+      if (isset($result['commerce_cardonfile'])) {
+        $instance_cards = commerce_cardonfile_load_multiple(array_keys($result['commerce_cardonfile']));
+
+        foreach ($instance_cards as $instance_card) {
+          if ($instance_card->card_id != $card->card_id) {
+            $instance_card->instance_default = 0;
+            commerce_cardonfile_save($instance_card);
+          }
+        }
+      }
+
+      $card->instance_default = !empty($instance_default_value);
+      return commerce_cardonfile_save($card);
+    }
+    return FALSE;
+  }
+
+  return FALSE;
+}
+
+/**
+ * Deletes stored card data by local ID.
+ *
+ * @param $card_id
+ *   The local ID of the card data to delete.
+ */
+function commerce_cardonfile_delete($card_id) {
+  return entity_delete('commerce_cardonfile', $card_id);
+}
+
+/**
+ * Returns TRUE if the card data has NOT expired
+ */
+function commerce_cardonfile_validate_card_expiration($card_data) {
+  if (!isset($card_data->card_exp_month) || !isset($card_data->card_exp_year)) {
+    return FALSE;
+  }
+
+  return commerce_cardonfile_validate_exp_date($card_data->card_exp_month, $card_data->card_exp_year);
+}
+
+/**
+ * Returns TRUE if the card has NOT expired
+ */
+function commerce_cardonfile_validate_exp_date($month, $year) {
+  commerce_cardonfile_load_credit_card_helpers();
+  $check = commerce_payment_validate_credit_card_exp_date($month, $year);
+  return $check === TRUE;
+}
+
+/**
+ * Returns an array of all available payment method cardonfile callbacks
+ */
+function commerce_cardonfile_payment_method_available_callbacks() {
+  return array(
+    'create callback',
+    'create form callback',
+    'update callback',
+    'update form callback',
+    'delete callback',
+    'charge callback',
+  );
+}
+
+/**
+ * Returns TRUE if the card can be charged
+ */
+function commerce_cardonfile_can_charge($card_data) {
+  // DENY if card is disabled
+  if (empty($card_data->status)) {
+    return FALSE;
+  }
+
+  // DENY if there is no payment method instance
+  if (empty($card_data->instance_id)) {
+    return FALSE;
+  }
+
+  // DENY if card is expired
+  if (!commerce_cardonfile_validate_card_expiration($card_data)) {
+    return FALSE;
+  }
+
+  // load payment method related to the card
+  $payment_method = commerce_payment_method_instance_load($card_data->instance_id);
+
+  // DENY if not a valid payment method
+  if (empty($payment_method)) {
+    return FALSE;
+  }
+
+  // ALLOW/DENY based on payment method capabilities
+  $callback = commerce_cardonfile_payment_method_callback($payment_method, 'charge callback');
+  return $callback ? TRUE : FALSE;
+}
+
+/**
+ * Returns the Card on File callback function for the given payment method.
+ *
+ * @param $payment_method
+ *   The payment method object.
+ * @param $callback
+ *   The callback function to return, one of:
+ *    - 'create callback'
+ *    - 'create form callback'
+ *    - 'update callback'
+ *    - 'update form callback'
+ *    - 'delete callback'
+ *    - 'charge callback'
+ *
+ * @return
+ *   A string containing the name of the callback function or FALSE if it could
+ *   not be found.
+ */
+function commerce_cardonfile_payment_method_callback($payment_method, $callback) {
+  if (!empty($payment_method) && !empty($payment_method['method_id'])) {
+    $implements = commerce_cardonfile_payment_method_implements($callback);
+    if (!empty($implements) && !empty($implements[$payment_method['method_id']])) {
+      return $implements[$payment_method['method_id']];
+    }
+  }
+}
+
+/**
+ * Returns all payment method instances that implement a specific callback
+ *
+ * @param $callback
+ *   The callback function to return, one of:
+ *    - 'create callback'
+ *    - 'create form callback'
+ *    - 'update callback'
+ *    - 'update form callback'
+ *    - 'delete callback'
+ *    - 'charge callback'
+ *
+ * @return
+ *   An array of callback function names keyed by payment method id
+ */
+function commerce_cardonfile_payment_method_implements($callback) {
+  $cache = &drupal_static(__FUNCTION__);
+
+  if (!isset($cache)) {
+    $cache = array();
+
+    // get payment methods and load module implements for hook_commerce_payment_method_info()
+    // so that cardonfile callback can be in same hook file, ie mymodule.commerce.inc
+    $payment_methods = _commerce_cardonfile_capable_payment_methods();
+    $available_callbacks = commerce_cardonfile_payment_method_available_callbacks();
+    foreach ($payment_methods as $method_id => $payment_method) {
+      foreach ($available_callbacks as $available_callback) {
+        if (!empty($payment_method['cardonfile'][$available_callback])) {
+          $func = $payment_method['cardonfile'][$available_callback];
+          if (function_exists($func)) {
+            $cache[$available_callback][$method_id] = $func;
+          }
+        }
+      }
+    }
+  }
+
+  return isset($cache[$callback]) ? $cache[$callback] : array();
+}
+
+
+
+/**
+ * Define property info for Carge Responce
+ */
+function commerce_cardonfile_charge_card_response_property_info_callback() {
+  return array(
+    'status' => array(
+      'label' => t('Status'),
+      'type' => 'boolean',
+    ),
+    'code' => array(
+      'label' => t('Status Code'),
+      'type' => 'text',
+      'options list' => 'commerce_cardonfile_charge_card_status_code_options',
+    ),
+    'error_level' => array(
+      'label' => t('Error Level'),
+      'type' => 'integer',
+      'options list' => 'commerce_cardonfile_charge_card_error_level_options',
+      'getter callback' => 'commerce_cardonfile_charge_card_get_properties',
+      'computed' => TRUE,
+    ),
+    'message' => array(
+      'label' => t('Message'),
+      'description' => t('Message for the process response.'),
+      'type' => 'text',
+      'getter callback' => 'commerce_cardonfile_charge_card_get_properties',
+      'computed' => TRUE,
+    ),
+    'card_chosen' => array(
+      'label' => t('Card Chosen'),
+      'type' => 'commerce_cardonfile',
+    ),
+  );
+}
+
+/**
+ * Implements hook_commerce_payment_transaction_status_info().
+ */
+function commerce_cardonfile_commerce_payment_transaction_status_info() {
+  $statuses = array();
+  foreach (commerce_cardonfile_charge_card_failure_status_code_options() as $status_name => $title) {
+    $statuses[$status_name] = array(
+      'status' => $status_name,
+      'title' => $title,
+      'icon' => drupal_get_path('module', 'commerce_payment') . '/theme/icon-failure.png',
+      'total' => TRUE,
+    );
+  }
+  return $statuses;
+}
+
+/**
+ * Returns an options list of processing card response status codes
+ */
+function commerce_cardonfile_charge_card_status_code_options() {
+  return array(
+    COMMERCE_COF_PROCESS_CODE_INSUFFICIENT_DATA => t('Insufficient data'),
+    COMMERCE_COF_PROCESS_CODE_CARD_NA => t('No card available'),
+    COMMERCE_COF_PROCESS_CODE_CARD_NOT_CHARGEABLE => t('Card not chargeable'),
+    COMMERCE_COF_PROCESS_CODE_METHOD_EMPTY => t('Payment method not valid'),
+    COMMERCE_COF_PROCESS_CODE_METHOD_NOT_CAPABLE => t('Payment method not capable'),
+    COMMERCE_COF_PROCESS_CODE_METHOD_SUCCESS => t('Payment method success'),
+  ) + commerce_cardonfile_charge_card_failure_status_code_options();
+}
+
+/**
+ * Returns an option list of processing card response failure status codes.
+ *
+ * These statuses are relevant when it comes to dunning management.
+ */
+function commerce_cardonfile_charge_card_failure_status_code_options() {
+  return array(
+    COMMERCE_COF_PROCESS_CODE_CARD_EXPIRED => t('Card expired'),
+    // For the sake of backwards compatibility, we leave this generic failure
+    // status here.
+    COMMERCE_COF_PROCESS_CODE_METHOD_FAILURE => t('Payment method failure'),
+    COMMERCE_COF_PROCESS_CODE_METHOD_FAILURE_INSUFFICIENT_FUNDS => t('Insufficient funds'),
+    COMMERCE_COF_PROCESS_CODE_METHOD_FAILURE_LIMIT_EXCEEDED => t('Limit exceeded'),
+    COMMERCE_COF_PROCESS_CODE_METHOD_FAILURE_CALL_ISSUER => t('Call issuer'),
+    COMMERCE_COF_PROCESS_CODE_METHOD_FAILURE_TEMPORARY_HOLD => t('Temporary hold'),
+    COMMERCE_COF_PROCESS_CODE_METHOD_FAILURE_GENERIC_DECLINE => t('Generic decline'),
+    COMMERCE_COF_PROCESS_CODE_METHOD_FAILURE_HARD_DECLINE => t('Hard decline (will never succeed)'),
+    COMMERCE_COF_PROCESS_CODE_METHOD_FAILURE_GATEWAY_ERROR => t('Try again/gateway error'),
+    COMMERCE_COF_PROCESS_CODE_METHOD_FAILURE_GATEWAY_UNAVAILABLE => t('Issuer or gateway unavailable'),
+    COMMERCE_COF_PROCESS_CODE_METHOD_FAILURE_GATEWAY_CONFIGURATION_ERROR => t('Communication/configuration error'),
+  );
+}
+
+/**
+ * Returns an option list of processing card response error level
+ */
+function commerce_cardonfile_charge_card_error_level_options() {
+  return array(
+    0 => t('Notice'),
+    1 => t('Warning'),
+    2 => t('Error'),
+  );
+}
+
+/**
+ * Callback for getting payment transaction properties.
+ */
+function commerce_cardonfile_charge_card_get_properties($data, array $options, $name) {
+  switch ($name) {
+    case 'message':
+      if (!empty($data['message'])) {
+        $message_variables = array();
+        if (!empty($data['message_variables']) && is_array($data['message_variables'])) {
+          $message_variables = $data['message_variables'];
+        }
+        return t($data['message'], $message_variables);
+      }
+      else {
+        return '';
+      }
+
+    case 'error_level':
+      return commerce_cardonfile_charge_card_error_level($data);
+  }
+}
+
+/**
+ * Returns the error level for a given card processing response array
+ */
+function commerce_cardonfile_charge_card_error_level($response) {
+  $level = 0;
+  $status_codes = commerce_cardonfile_charge_card_status_code_options();
+  if (empty($response['code']) || !isset($status_codes[$response['code']])) {
+    return $level;
+  }
+
+  switch ($response['code']) {
+    case COMMERCE_COF_PROCESS_CODE_INSUFFICIENT_DATA:
+    case COMMERCE_COF_PROCESS_CODE_CARD_NA:
+      $level = 0;
+      break;
+
+    case COMMERCE_COF_PROCESS_CODE_METHOD_EMPTY:
+    case COMMERCE_COF_PROCESS_CODE_METHOD_NOT_CAPABLE:
+      $level = 1;
+      break;
+
+    default:
+      // Every other possible status code falls into this level of error.
+      $level = 2;
+      break;
+  }
+
+  return $level;
+}
+
+/**
+ * Select the card on file that can be charged for an order.
+ */
+function commerce_cardonfile_order_select_card($order, $forced_instance_id = NULL) {
+  $response = array(
+    'code' => COMMERCE_COF_PROCESS_CODE_CARD_NA,
+    'message' => 'No chargeable card on file is available for the order @order_id and user @uid.',
+  );
+
+  if ($possible_cards = commerce_cardonfile_load_user_default_cards($order->uid, $forced_instance_id)) {
+    // Determine any chargeable cards ...
+    $card_data = array();
+    $unchargeable_cards = array();
+    foreach ($possible_cards as $card_id => $possible_card) {
+      if (commerce_cardonfile_order_can_charge_card($order, $possible_card) &&
+        (!$forced_instance_id || !isset($possible_card->instance_id) || $possible_card->instance_id == $forced_instance_id)) {
+        $response['card_chosen'] = $possible_card;
+        $response['code'] = COMMERCE_COF_PROCESS_CODE_CARD_OK;
+        $response['message'] = 'Card can be attempted to charge for @order_id.';
+        break;
+      }
+      else {
+        $unchargeable_cards[$card_id] = $possible_card;
+      }
+    }
+
+    if (empty($response['card_chosen']) && !empty($unchargeable_cards)) {
+      // check first unchargeable card for expiration
+      $unchargeable_card_top = reset($unchargeable_cards);
+      $response['card_chosen'] = $unchargeable_card_top;
+      if (!commerce_cardonfile_validate_card_expiration($unchargeable_card_top)) {
+        $response['code'] = COMMERCE_COF_PROCESS_CODE_CARD_EXPIRED;
+        $response['message'] = 'Card on file has expired for user @uid\'s card @card_id when attempting to process order @order_id.';
+      }
+    }
+  }
+
+  return $response;
+}
+
+/**
+ * Process a charge for a given an order
+ *
+ * Wrapper function for _commerce_cardonfile_order_invoke_process_card() to
+ * trigger rules events
+ *
+ * @param $order
+ *   An order object
+ * @param $charge
+ *   Charge array of amount, currency_code
+ * @param $card_data
+ *   The card data array.
+ * @param $forced_instance_id
+ *   Payment instance ID to enforce the usage of a specific payment gateway
+ *
+ * @return
+ *   TRUE if the order was processed successfully
+ */
+function commerce_cardonfile_order_charge_card($order, $charge = array(), $card_data = array(), $forced_instance_id = NULL) {
+
+  $response = array(
+    'status' => FALSE,
+    'code' => COMMERCE_COF_PROCESS_CODE_INSUFFICIENT_DATA,
+    'message' => '',
+    'message_variables' => array(),
+  );
+
+  // Exit if no order id
+  if (empty($order->order_id)) {
+    $response['message'] = 'Order ID is not provided.';
+    return $response;
+  }
+
+  $response['message_variables'] += array(
+    '@order_id' => $order->order_id,
+  );
+
+  // Exit if no user associated with the order
+  if (empty($order->uid)) {
+    $response['message'] = 'Order owner not provided for order @order_id.';
+    return $response;
+  }
+  $response['message_variables'] += array(
+    '@uid' => $order->uid,
+  );
+
+  // determine charge amount
+  // set charge to order balance if none provided
+  if (empty($charge)) {
+    $charge = commerce_payment_order_balance($order);
+  }
+
+  // exit if no charge
+  if (empty($charge) || empty($charge['amount']) || empty($charge['currency_code'])) {
+    $response['message'] = 'Charge amount not provided for order @order_id.';
+    return $response;
+  }
+
+  $response['message_variables'] += array(
+    '@charge' => commerce_currency_format($charge['amount'], $charge['currency_code']),
+  );
+
+  // exit if no card data provided
+  if (empty($card_data)) {
+    $response['message'] = 'Card data not provided for order @order_id.';
+    return $response;
+  }
+  $response['card_chosen'] = $card_data;
+  if (!commerce_cardonfile_order_can_charge_card($order, $card_data)) {
+    // check for expiration to set a specific code
+    if (!commerce_cardonfile_validate_card_expiration($card_data)) {
+      $response['code'] = COMMERCE_COF_PROCESS_CODE_CARD_EXPIRED;
+      $response['message'] = 'Card on file has expired for user @uid\'s card @card_id when attempting to process order @order_id.';
+    }
+    else {
+      $response['code'] = COMMERCE_COF_PROCESS_CODE_CARD_NOT_CHARGEABLE;
+      $response['message'] = 'Card provided cannot be charged for the order @order_id and user @uid.';
+    }
+    return $response;
+  }
+
+  // resolve payment method instance input
+  $instance_is_forced = FALSE;
+  if (!empty($forced_instance_id)) {
+    $instance_is_forced = TRUE;
+
+    // set the order data so chargeable hook can use to determine the card
+    $order->data['payment_method'] = $forced_instance_id;
+    $response['message_variables'] += array(
+      '@instance_id' => $forced_instance_id,
+    );
+  }
+  else {
+    $forced_instance_id = NULL;
+  }
+
+  if ($instance_is_forced && isset($card_data->instance_id) && $card_data->instance_id != $forced_instance_id) {
+    $response['code'] = COMMERCE_COF_PROCESS_CODE_CARD_NOT_CHARGEABLE;
+    $response['message'] = 'Card provided is not registered with the requested payment method: Order @order_id, user @uid, payment instance @instance_id';
+
+    return $response;
+  }
+
+  // Wrap up the order
+  $order_wrapper = entity_metadata_wrapper('commerce_order', $order);
+
+  // load payment method
+  $payment_method = commerce_payment_method_instance_load($card_data->instance_id);
+  if (empty($payment_method)) {
+    $response['code'] = COMMERCE_COF_PROCESS_CODE_METHOD_EMPTY;
+    $response['message'] = 'The payment method instance (@instance_id) is not available on the system.';
+    return $response;
+  }
+
+  $response['message_variables'] += array(
+    '@method' => isset($payment_method['short_title']) ? $payment_method['short_title'] : $payment_method['method_id'],
+  );
+
+  // determine payment method's callback function
+  $func = commerce_cardonfile_payment_method_callback($payment_method, 'charge callback');
+
+  // Exit if no callback - sanity check since it should have this if "can charge"
+  if (empty($func)) {
+    $response['code'] = COMMERCE_COF_PROCESS_CODE_METHOD_NOT_CAPABLE;
+    $response['message'] = 'The payment method @method instance (@instance_id) does not implement a valid card on file "charge callback".';
+    return $response;
+  }
+
+  // invoke callback function
+  $method_return = $func($payment_method, $card_data, $order, $charge);
+
+  // process return from gateway module
+  // Backwards compatibility: returned value can be a boolean FALSE or a
+  // specified failure code.
+  if ($method_return === FALSE || !in_array($method_return, array(COMMERCE_PAYMENT_STATUS_SUCCESS, COMMERCE_PAYMENT_STATUS_PENDING))) {
+    // Failure
+    $response['status'] = FALSE;
+    // If the returned value doesn't specify the failure code, save a generic
+    // one.
+    $response['code'] = ($method_return === FALSE) ? COMMERCE_COF_PROCESS_CODE_METHOD_FAILURE : $method_return;
+    $response['message'] = 'The payment method @method instance (@instance_id) failed for order @order_id, user @uid, card @card_id, charge amount @charge.';
+  }
+  else {
+    // Success
+    $response['status'] = TRUE;
+    $response['code'] = $method_return;
+    $response['message'] = 'The payment method  @method instance (@instance_id) was successful for order @order_id, user @uid, card @card_id, charge amount @charge.';
+
+    // load a fresh order in case it was modified during method callback
+    $order = commerce_order_load($order->order_id);
+    $order_wrapper = entity_metadata_wrapper('commerce_order', $order);
+
+    // Store the last processed card on the order card reference field
+    if (isset($order_wrapper->commerce_cardonfile)) {
+      $order_ref_card_id = $order_wrapper->commerce_cardonfile->value();
+      if (empty($order_ref_card_id) || $order_ref_card_id != $card_data->card_id) {
+        $order_wrapper->commerce_cardonfile = array('card_id' => $card_data->card_id);
+        $order_wrapper->save();
+      }
+    }
+  }
+
+  if (!empty($response['card_chosen'])) {
+    $card_chosen = $response['card_chosen'];
+  }
+  elseif (!empty($card_data)) {
+    $card_chosen = $card_data;
+  }
+
+  if (empty($response) || empty($response['status'])) {
+    rules_invoke_all('commerce_cardonfile_charge_failed', $card_chosen, $order, $charge, $response);
+  }
+  else {
+    rules_invoke_all('commerce_cardonfile_charge_success', $card_chosen, $order, $charge, $response);
+  }
+
+  return $response;
+}
+
+/**
+ * Returns TRUE if the card can be charged for the given order
+ */
+function commerce_cardonfile_order_can_charge_card($order, $card_data) {
+  // DENY if no order id
+  if (empty($order->order_id)) {
+    return FALSE;
+  }
+
+  // DENY if no owner provided
+  if (empty($order->uid) || empty($card_data->uid)) {
+    return FALSE;
+  }
+
+  // DENY if owners do not match
+  if ($card_data->uid != $order->uid) {
+    return FALSE;
+  }
+
+  return commerce_cardonfile_can_charge($card_data);
+}
+
+/**
+ * Returns all payment methods that are card on file capable
+ *
+ * @return
+ *  An associative array of payment method objects keyed by the method_id.
+ */
+function _commerce_cardonfile_capable_payment_methods() {
+  $capable_methods = array();
+  $payment_methods = commerce_payment_methods();
+  foreach ($payment_methods as $method_id => $payment_method) {
+    if (_commerce_cardonfile_capable_payment_method_check($payment_method)) {
+      $capable_methods[$method_id] = $payment_method;
+    }
+  }
+
+  return $capable_methods;
+}
+
+/**
+ * Returns TRUE if a payment method is capable of card on file
+ *
+ * @param $payment_method
+ *   An associative array of payment method objects keyed by the method_id.
+ *
+ * @return
+ *   TRUE if payment method is capable of card on file
+ */
+function _commerce_cardonfile_capable_payment_method_check($payment_method) {
+  return !empty($payment_method['cardonfile']) ? $payment_method['cardonfile'] : FALSE;
+}
+
+/**
+ * Returns all payment method instances for a given payment method id
+ *
+ * @param $method_id
+ *   A payment method id
+ * @param $include_disabled
+ *   Return enabled and disabled instances
+ *
+ * @return
+ *   An array of all loaded payment method instances keyed by instance_id
+ */
+function _commerce_cardonfile_payment_method_instances($method_id, $include_disabled = FALSE) {
+  $cached_ids = &drupal_static(__FUNCTION__, array());
+  $include_disabled = !empty($include_disabled);
+
+  if (!array_key_exists($method_id, $cached_ids)) {
+    $cached_ids[$method_id] = array();
+
+    // load all rules ... no easier way
+    $rules_configs = rules_config_load_multiple(FALSE);
+
+    // find all rules with an action to enable this method
+    foreach ($rules_configs as $rule_name => $rule) {
+      // Only rules and sub-types have actions.
+      if (!($rule instanceof Rule)) {
+        continue;
+      }
+
+      // fast skip if rule does not depend on commerce_payment
+      if (!isset($rule->dependencies) || !in_array('commerce_payment', $rule->dependencies)) {
+        continue;
+      }
+
+      foreach ($rule->actions() as $action) {
+        // skip any actions that are not simple rules actions, ie loops
+        if (!($action instanceof RulesAction)) {
+          continue;
+        }
+
+        if ($action->getElementName() == 'commerce_payment_enable_' . $method_id) {
+          $instance_id = commerce_payment_method_instance_id($method_id, $rule);
+          $cached_ids[$method_id][$instance_id] = $rule->active;
+          continue 2; // skip to next rule
+        }
+      }
+    }
+  }
+
+  // load instances
+  $instances = array();
+  if (!empty($cached_ids[$method_id])) {
+    foreach ($cached_ids[$method_id] as $instance_id => $instance_active) {
+      if ($instance_active || $include_disabled) {
+        $instances[$instance_id] = commerce_payment_method_instance_load($instance_id);
+      }
+    }
+  }
+
+  return $instances;
+}
+
+/**
+ * Loads credit card helper functions in commerce_payment
+ */
+function commerce_cardonfile_load_credit_card_helpers() {
+  static $loaded = FALSE;
+
+  if (!$loaded) {
+    $loaded = module_load_include('inc', 'commerce_payment', 'includes/commerce_payment.credit_card');
+  }
+}

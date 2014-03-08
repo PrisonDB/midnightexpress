@@ -1,0 +1,30 @@
+<?php
+
+/**
+ * @file
+ * Installation file for Feeds JSONPath Parser module.
+ */
+
+/**
+ * Implements hook_requirements().
+ */
+function feeds_jsonpath_parser_requirements($phase) {
+  $requirements = array();
+
+  if ($phase == 'install') {
+    $t = get_t();
+    $requirements['feeds_jsonpath_parser']['title'] = $t('Feeds JSONPath Parser');
+
+    if (glob(dirname(__FILE__) . '/jsonpath*.php')) {
+      $requirements['feeds_jsonpath_parser']['severity'] = REQUIREMENT_OK;
+    }
+    else {
+      $requirements['feeds_jsonpath_parser']['severity'] = REQUIREMENT_ERROR;
+      $requirements['feeds_jsonpath_parser']['description'] = $t('The <a href="@jsonpath">JSONPath</a> plugin is missing. <a href="@download">Download</a> and place in the feeds_jsonpath_parser module directory.', array(
+        '@jsonpath' => 'http://goessner.net/articles/JsonPath/',
+        '@download' => 'http://jsonpath.googlecode.com/svn/trunk/src/php/jsonpath.php',
+      ));
+    }
+  }
+  return $requirements;
+}

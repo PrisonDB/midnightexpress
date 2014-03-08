@@ -1,0 +1,13 @@
+name = Commerce Dunning Testing
+description = Provides tools and a payment method for manually testing the functionality of Commerce Dunning.
+package = Testing
+dependencies[] = commerce_dunning
+core = 7.x
+; hidden = TRUE
+
+; Information added by Drupal.org packaging script on 2013-12-09
+version = "7.x-1.0-beta2"
+core = "7.x"
+project = "commerce_dunning"
+datestamp = "1386608981"
+

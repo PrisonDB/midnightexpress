@@ -1,0 +1,93 @@
+<?php
+
+/**
+ * @file
+ * Provides a toolset for dunning management.
+ */
+
+/**
+ * Implements hook_commerce_order_status_info().
+ */
+function commerce_dunning_commerce_order_status_info() {
+  return array(
+    'dunning_past_due' => array(
+      'name' => 'dunning_past_due',
+      'title' => t('Past due'),
+      'state' => 'canceled',
+    ),
+  );
+}
+
+/**
+ * Retrieves scheduled tasks related to the dunning process.
+ *
+ * Returns all tasks scheduled by Rules Scheduler that are related to a certain
+ * order if that's specified.
+ *
+ * Rules Scheduler only assigns a unique string identifier to the tasks, so we
+ * need to use a pattern that designates that a tasks belongs to the dunning
+ * process and also tells the ID of the order. The established pattern is:
+ *
+ * dunning-[order id]-[short action description]
+ *
+ * Short action description can also contain a variable, for example the number
+ * of days after a certain action should be evaluated in the dunning process.
+ * E.g.: dunning-22-charge-attempt-2-days
+ */
+function commerce_dunning_get_scheduled_tasks($order_id = NULL) {
+  $return = array();
+  $result = db_select('rules_scheduler', 'r')
+    ->fields('r', array('tid', 'config', 'date', 'identifier'))
+    ->condition('identifier', 'dunning-' . $order_id . '%', 'LIKE')
+    ->orderBy('tid')
+    ->execute();
+  foreach ($result as $task) {
+    $return[$task->tid] = array(
+      'config' => $task->config,
+      'date' => $task->date,
+      'identifier' => $task->identifier,
+    );
+  }
+  return $return;
+}
+
+/**
+ * Retrieves dates of upcoming charge attempts in the dunning process.
+ *
+ * @param int $order_id
+ *   Identifier of order which the dunning process belongs to.
+ *
+ * @return array
+ *   Unix timestamps of the upcoming charge attempt's dates.
+ */
+function commerce_dunning_get_next_charge_attempt_dates($order_id) {
+  $return = array();
+  $scheduled_tasks = commerce_dunning_get_scheduled_tasks($order_id);
+  foreach ($scheduled_tasks as $task) {
+    if ($task['config'] == 'rules_commerce_dunning_charge_card') {
+      $return[] = $task['date'];
+    }
+  }
+  return $return;
+}
+
+/**
+ * Checks whether the order has a revision with the defined status(es).
+ *
+ * @param Entity $order
+ *   The order of which revisions are checked.
+ * @param array $statuses
+ *   Statuses are checked among the order's revisions.
+ *
+ * @return bool
+ *   Whether a revision of the order exists with the defined status(es).
+ */
+function commerce_dunning_order_has_revision_with_status($order, $statuses) {
+  $query = db_select('commerce_order_revision', 'c')
+    ->fields('c', array('revision_id'))
+    ->condition('order_id', $order->order_id)
+    ->condition('status', $statuses, 'IN');
+
+  $count = $query->countQuery()->execute()->fetchfield();
+  return $count > 0;
+}

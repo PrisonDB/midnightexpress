@@ -1,0 +1,298 @@
+<?php
+
+/**
+ * @file
+ * Provides sensible default configuration for Commerce Dunning.
+ */
+
+/**
+ * Machine name of fields that the module uses.
+ */
+define('COMMERCE_DUNNING_DEFAULTS_MESSAGE_TYPE_TEXT_FIELD', 'message_text');
+define('COMMERCE_DUNNING_DEFAULTS_MESSAGE_TYPE_TEXT_ACTION_NEXT_FIELD', 'dunning_message_text_next');
+define('COMMERCE_DUNNING_DEFAULTS_MESSAGE_TYPE_TEXT_ACTION_FINAL_FIELD', 'dunning_message_text_final');
+define('COMMERCE_DUNNING_DEFAULTS_MESSAGE_TYPE_TEXT_TERMINATED_FIELD', 'dunning_message_text_terminated');
+define('COMMERCE_DUNNING_DEFAULTS_MESSAGE_ORDER_REFERENCE_FIELD', 'commerce_dunning_message_order');
+define('COMMERCE_DUNNING_DEFAULTS_MESSAGE_CARD_REFERENCE_FIELD', 'commerce_dunning_message_card');
+
+/**
+ * Implements hook_default_message_type_category().
+ */
+function commerce_dunning_defaults_default_message_type_category() {
+  $items = array();
+  $items['commerce_dunning_message'] = entity_import('message_type_category', '{
+    "category" : "commerce_dunning_message",
+    "description" : "A message produced during a Dunning process.",
+    "language" : "",
+    "rdf_mapping" : []
+  }');
+  return $items;
+}
+
+/**
+ * Implements hook_default_message_type().
+ *
+ * Provides the following message types:
+ *   - Commerce Dunning: hard declined card
+ *   - Commerce Dunning: soft declined card
+ */
+function commerce_dunning_defaults_default_message_type() {
+  $items = array();
+  $items['commerce_dunning_hard_declined_card'] = entity_import('message_type', '{
+    "name" : "commerce_dunning_hard_declined_card",
+    "description" : "Commerce Dunning: hard declined card",
+    "argument_keys" : [],
+    "argument" : [],
+    "category" : "commerce_dunning_message",
+    "data" : {
+      "token options" : { "clear" : 0 },
+      "purge" : { "override" : 0, "enabled" : 0, "quota" : "", "days" : "" }
+    },
+    "language" : "",
+    "arguments" : null,
+    "message_text" : { "und" : [
+        {
+          "value" : "[[site:name]] Payment failed",
+          "format" : "filtered_html",
+          "safe_value" : "\u003Cp\u003E[[site:name]] Payment failed\u003C\/p\u003E\n"
+        },
+        {
+          "value" : "\u003Ctable style=\u0022border: 1px solid #ccc;font-family:\u0027Open Sans\u0027,\u0027Helvetica Neue\u0027, Helvetica, Arial, sans-serif;\u0022\u003E\r\n  \u003Ctbody\u003E\r\n  \u003Ctr\u003E\r\n    \u003Ctd style=\u0022padding: 5px;\u0022\u003E\r\n      \u003Cdiv class=\u0022header\u0022 style=\u0022background: #eee;padding: 20px;text-align:center;\u0022\u003E\u003Ca href=\u0022[site:url]\u0022\u003E[site:site-logo]\u003C\/a\u003E\u003C\/div\u003E\r\n    \u003C\/td\u003E\r\n  \u003C\/tr\u003E\r\n  \u003Ctr\u003E\r\n    \u003Ctd style=\u0022padding:30px 0;\u0022\u003E\r\n      \u003Ctable style=\u0022width:100%;border:none;\u0022\u003E\r\n        \u003Ctr\u003E\r\n          \u003Ctd style=\u0022width:5%;\u0022\u003E\u003C\/td\u003E\r\n          \u003Ctd\u003E\u003Ch1 style=\u0022text-align: center;margin-bottom:20px;font-weight: normal;font-size:18px;color:#333;\u0022\u003EYour payment was declined.\u003C\/h1\u003E\r\n            \u003Cdiv class=\u0022message\u0022 style=\u0022background: #f4f4f4;padding:20px;text-align: center;margin-bottom:10px;\u0022\u003E\r\n              \u003Cp style=\u0022margin-bottom: 30px;font-size:14px;\u0022\u003EWe attempted to charge the \u003Cspan style=\u0022text-transform:uppercase;\u0022\u003E[message:commerce-dunning-message-card:card-type]\u003C\/span\u003E ending in [message:commerce-dunning-message-card:card-number] for [message:commerce-dunning-message-order:commerce_order_total] on [message:commerce-dunning-message-order:changed], your payment information needs to be updated before it can be processed.\u003C\/p\u003E\r\n              \u003Cp style=\u0022font-size:14px;\u0022\u003E\u003Cstrong\u003EAffected orders:\u003C\/strong\u003E\u003C\/p\u003E\r\n              \u003Ctable style=\u0022background: #ddd;width:100%;margin-bottom: 50px;\u0022\u003E\r\n                \u003Ctr\u003E\r\n                  \u003Ctd style=\u0022padding:20px;font-size:18px;text-align:left;\u0022\u003E\r\n                    \u003Ca href=\u0022[message:commerce-dunning-message-order:customer-url]\u0022\u003E[message:commerce-dunning-message-order]\u003C\/a\u003E\r\n                  \u003C\/td\u003E\r\n                  \u003Ctd style=\u0022padding:20px;font-size:18px;text-align:right;\u0022\u003E\r\n                    [message:commerce-dunning-message-order:commerce_order_total]\r\n                  \u003C\/td\u003E\r\n                \u003C\/tr\u003E\r\n              \u003C\/table\u003E\r\n              !dunning-context-info\r\n              \u003Cp style=\u0022margin-bottom: 30px;\u0022\u003E\u003Ca href=\u0022[site:url]user\/[message:commerce-dunning-message-order:uid]\/cards\u0022 class=\u0022button\u0022 style=\u0022background:#009cd5; display: inline-block;padding:15px 30px;color:#fff;text-decoration:none;font-weight: normal;\u0022\u003EREVIEW PAYMENT INFORMATION\u003C\/a\u003E\u003C\/p\u003E\r\n            \u003C\/div\u003E\r\n            \u003Cp style=\u0022font-size:12px;\u0022\u003E\u003Cstrong\u003EHave questions?\u003C\/strong\u003E \u003Ca href=\u0022[site:url]\u0022 style=\u0022color:#009cd5\u0022\u003EContact Us \u003E\u003E\u003C\/a\u003E\u003C\/p\u003E\u003C\/td\u003E\r\n          \u003Ctd style=\u0022width:5%;\u0022\u003E\u003C\/td\u003E\r\n        \u003C\/tr\u003E\r\n      \u003C\/table\u003E\r\n    \u003C\/td\u003E\r\n  \u003C\/tr\u003E\r\n  \u003C\/tbody\u003E\r\n\u003C\/table\u003E",
+          "format" : "full_html",
+          "safe_value" : "\u003Ctable style=\u0022border: 1px solid #ccc;font-family:\u0027Open Sans\u0027,\u0027Helvetica Neue\u0027, Helvetica, Arial, sans-serif;\u0022\u003E\u003Ctbody\u003E\u003Ctr\u003E\u003Ctd style=\u0022padding: 5px;\u0022\u003E\n\u003Cdiv class=\u0022header\u0022 style=\u0022background: #eee;padding: 20px;text-align:center;\u0022\u003E\u003Ca href=\u0022[site:url]\u0022\u003E[site:site-logo]\u003C\/a\u003E\u003C\/div\u003E\n\u003C\/td\u003E\n\u003C\/tr\u003E\u003Ctr\u003E\u003Ctd style=\u0022padding:30px 0;\u0022\u003E\n\u003Ctable style=\u0022width:100%;border:none;\u0022\u003E\u003Ctr\u003E\u003Ctd style=\u0022width:5%;\u0022\u003E\u003C\/td\u003E\n\u003Ctd\u003E\n\u003Ch1 style=\u0022text-align: center;margin-bottom:20px;font-weight: normal;font-size:18px;color:#333;\u0022\u003EYour payment was declined.\u003C\/h1\u003E\n\u003Cdiv class=\u0022message\u0022 style=\u0022background: #f4f4f4;padding:20px;text-align: center;margin-bottom:10px;\u0022\u003E\n\u003Cp style=\u0022margin-bottom: 30px;font-size:14px;\u0022\u003EWe attempted to charge the \u003Cspan style=\u0022text-transform:uppercase;\u0022\u003E[message:commerce-dunning-message-card:card-type]\u003C\/span\u003E ending in [message:commerce-dunning-message-card:card-number] for [message:commerce-dunning-message-order:commerce_order_total] on [message:commerce-dunning-message-order:changed], your payment information needs to be updated before it can be processed.\u003C\/p\u003E\n\u003Cp style=\u0022font-size:14px;\u0022\u003E\u003Cstrong\u003EAffected orders:\u003C\/strong\u003E\u003C\/p\u003E\n\u003Ctable style=\u0022background: #ddd;width:100%;margin-bottom: 50px;\u0022\u003E\u003Ctr\u003E\u003Ctd style=\u0022padding:20px;font-size:18px;text-align:left;\u0022\u003E\n                    \u003Ca href=\u0022[message:commerce-dunning-message-order:customer-url]\u0022\u003E[message:commerce-dunning-message-order]\u003C\/a\u003E\n                  \u003C\/td\u003E\n\u003Ctd style=\u0022padding:20px;font-size:18px;text-align:right;\u0022\u003E\n                    [message:commerce-dunning-message-order:commerce_order_total]\n                  \u003C\/td\u003E\n\u003C\/tr\u003E\u003C\/table\u003E\u003Cp\u003E              !dunning-context-info\u003C\/p\u003E\n\u003Cp style=\u0022margin-bottom: 30px;\u0022\u003E\u003Ca href=\u0022[site:url]user\/[message:commerce-dunning-message-order:uid]\/cards\u0022 class=\u0022button\u0022 style=\u0022background:#009cd5; display: inline-block;padding:15px 30px;color:#fff;text-decoration:none;font-weight: normal;\u0022\u003EREVIEW PAYMENT INFORMATION\u003C\/a\u003E\u003C\/p\u003E\n\u003C\/div\u003E\n\u003Cp style=\u0022font-size:12px;\u0022\u003E\u003Cstrong\u003EHave questions?\u003C\/strong\u003E \u003Ca href=\u0022[site:url]\u0022 style=\u0022color:#009cd5\u0022\u003EContact Us \u0026gt;\u0026gt;\u003C\/a\u003E\u003C\/p\u003E\n\u003C\/td\u003E\n\u003Ctd style=\u0022width:5%;\u0022\u003E\u003C\/td\u003E\n\u003C\/tr\u003E\u003C\/table\u003E\u003C\/td\u003E\n\u003C\/tr\u003E\u003C\/tbody\u003E\u003C\/table\u003E"
+        }
+      ]
+    },
+    "dunning_message_text_next" : { "und" : [
+        {
+          "value" : "\u003Cp style=\u0022margin-bottom: 30px;font-size:18px;\u0022\u003EPlease re-enter your credit card information.\u003C\/p\u003E",
+          "format" : "full_html",
+          "safe_value" : "\u003Cp style=\u0022margin-bottom: 30px;font-size:18px;\u0022\u003EPlease re-enter your credit card information.\u003C\/p\u003E\n"
+        }
+      ]
+    },
+    "dunning_message_text_final" : { "und" : [
+        {
+          "value" : "\u003Cp style=\u0022font-style:italic;font-size:13px;margin:0 0 10px;text-align: center;\u0022\u003E*Final Notice: Please update your billing information to avoid cancellation*\u003C\/p\u003E\r\n\u003Cp style=\u0022margin-bottom: 30px;font-size:18px;\u0022\u003EWe will attempt to charge your card one last time again \u003Cbr \/\u003E\u003Cstrong\u003E!charge-attempt-date\u003C\/strong\u003E.\u003C\/p\u003E",
+          "format" : "full_html",
+          "safe_value" : "\u003Cp style=\u0022font-style:italic;font-size:13px;margin:0 0 10px;text-align: center;\u0022\u003E*Final Notice: Please update your billing information to avoid cancellation*\u003C\/p\u003E\n\u003Cp style=\u0022margin-bottom: 30px;font-size:18px;\u0022\u003EWe will attempt to charge your card one last time again \u003Cbr \/\u003E\u003Cstrong\u003E!charge-attempt-date\u003C\/strong\u003E.\u003C\/p\u003E\n"
+        }
+      ]
+    },
+    "dunning_message_text_terminated" : { "und" : [
+        {
+          "value" : "\u003Cp style=\u0022margin-bottom: 30px;font-size:18px;\u0022\u003EYour service is being terminated.\u003C\/p\u003E",
+          "format" : "full_html",
+          "safe_value" : "\u003Cp style=\u0022margin-bottom: 30px;font-size:18px;\u0022\u003EYour service is being terminated.\u003C\/p\u003E\n"
+        }
+      ]
+    }
+  }');
+  $items['commerce_dunning_soft_declined_card'] = entity_import('message_type', '{
+    "name" : "commerce_dunning_soft_declined_card",
+    "description" : "Commerce Dunning: soft declined card",
+    "argument_keys" : [],
+    "argument" : [],
+    "category" : "commerce_dunning_message",
+    "data" : {
+      "token options" : { "clear" : 0 },
+      "purge" : { "override" : 0, "enabled" : 0, "quota" : "", "days" : "" }
+    },
+    "language" : "",
+    "arguments" : null,
+    "message_text" : { "und" : [
+        {
+          "value" : "[[site:name]] Payment failed",
+          "format" : "filtered_html",
+          "safe_value" : "\u003Cp\u003E[[site:name]] Payment failed\u003C\/p\u003E\n"
+        },
+        {
+          "value" : "\u003Ctable style=\u0022border: 1px solid #ccc;font-family:\u0027Open Sans\u0027,\u0027Helvetica Neue\u0027, Helvetica, Arial, sans-serif;\u0022\u003E\r\n  \u003Ctbody\u003E\r\n  \u003Ctr\u003E\r\n    \u003Ctd style=\u0022padding: 5px;\u0022\u003E\r\n      \u003Cdiv class=\u0022header\u0022 style=\u0022background: #eee;padding: 20px;text-align:center;\u0022\u003E\u003Ca href=\u0022[site:url]\u0022\u003E[site:site-logo]\u003C\/a\u003E\u003C\/div\u003E\r\n    \u003C\/td\u003E\r\n  \u003C\/tr\u003E\r\n  \u003Ctr\u003E\r\n    \u003Ctd style=\u0022padding:30px 0;\u0022\u003E\r\n      \u003Ctable style=\u0022width:100%;border:none;\u0022\u003E\r\n        \u003Ctr\u003E\r\n          \u003Ctd style=\u0022width:5%;\u0022\u003E\u003C\/td\u003E\r\n          \u003Ctd\u003E\u003Ch1 style=\u0022text-align: center;margin-bottom:20px;font-weight: normal;font-size:18px;color:#333;\u0022\u003EYour payment was declined.\u003C\/h1\u003E\r\n            \u003Cdiv class=\u0022message\u0022 style=\u0022background: #f4f4f4;padding:20px;text-align: center;margin-bottom:10px;\u0022\u003E\r\n              \u003Cp style=\u0022margin-bottom: 30px;font-size:14px;\u0022\u003EWe attempted to charge the \u003Cspan style=\u0022text-transform:uppercase;\u0022\u003E[message:commerce-dunning-message-card:card-type]\u003C\/span\u003E ending in [message:commerce-dunning-message-card:card-number] for [message:commerce-dunning-message-order:commerce_order_total] on [message:commerce-dunning-message-order:changed], but the payment was declined.\u003C\/p\u003E\r\n              \u003Cp style=\u0022font-size:14px;\u0022\u003E\u003Cstrong\u003EAffected orders:\u003C\/strong\u003E\u003C\/p\u003E\r\n              \u003Ctable style=\u0022background: #ddd;width:100%;margin-bottom: 50px;\u0022\u003E\r\n                \u003Ctr\u003E\r\n                  \u003Ctd style=\u0022padding:20px;font-size:18px;text-align:left;\u0022\u003E\r\n                    \u003Ca href=\u0022[message:commerce-dunning-message-order:customer-url]\u0022\u003E[message:commerce-dunning-message-order]\u003C\/a\u003E\r\n                  \u003C\/td\u003E\r\n                  \u003Ctd style=\u0022padding:20px;font-size:18px;text-align:right;\u0022\u003E\r\n                    [message:commerce-dunning-message-order:commerce_order_total]\r\n                  \u003C\/td\u003E\r\n                \u003C\/tr\u003E\r\n              \u003C\/table\u003E\r\n              !dunning-context-info\r\n              \u003Cp style=\u0022margin-bottom: 30px;\u0022\u003E\u003Ca href=\u0022[site:url]user\/[message:commerce-dunning-message-order:uid]\/cards\u0022 class=\u0022button\u0022 style=\u0022background:#009cd5; display: inline-block;padding:15px 30px;color:#fff;text-decoration:none;font-weight: normal;\u0022\u003EREVIEW PAYMENT INFORMATION\u003C\/a\u003E\u003C\/p\u003E\r\n            \u003C\/div\u003E\r\n            \u003Cp style=\u0022font-size:12px;\u0022\u003E\u003Cstrong\u003EHave questions?\u003C\/strong\u003E \u003Ca href=\u0022[site:url]\u0022 style=\u0022color:#009cd5\u0022\u003EContact Us \u003E\u003E\u003C\/a\u003E\u003C\/p\u003E\u003C\/td\u003E\r\n          \u003Ctd style=\u0022width:5%;\u0022\u003E\u003C\/td\u003E\r\n        \u003C\/tr\u003E\r\n      \u003C\/table\u003E\r\n    \u003C\/td\u003E\r\n  \u003C\/tr\u003E\r\n  \u003C\/tbody\u003E\r\n\u003C\/table\u003E",
+          "format" : "full_html",
+          "safe_value" : "\u003Ctable style=\u0022border: 1px solid #ccc;font-family:\u0027Open Sans\u0027,\u0027Helvetica Neue\u0027, Helvetica, Arial, sans-serif;\u0022\u003E\u003Ctbody\u003E\u003Ctr\u003E\u003Ctd style=\u0022padding: 5px;\u0022\u003E\n\u003Cdiv class=\u0022header\u0022 style=\u0022background: #eee;padding: 20px;text-align:center;\u0022\u003E\u003Ca href=\u0022[site:url]\u0022\u003E[site:site-logo]\u003C\/a\u003E\u003C\/div\u003E\n\u003C\/td\u003E\n\u003C\/tr\u003E\u003Ctr\u003E\u003Ctd style=\u0022padding:30px 0;\u0022\u003E\n\u003Ctable style=\u0022width:100%;border:none;\u0022\u003E\u003Ctr\u003E\u003Ctd style=\u0022width:5%;\u0022\u003E\u003C\/td\u003E\n\u003Ctd\u003E\n\u003Ch1 style=\u0022text-align: center;margin-bottom:20px;font-weight: normal;font-size:18px;color:#333;\u0022\u003EYour payment was declined.\u003C\/h1\u003E\n\u003Cdiv class=\u0022message\u0022 style=\u0022background: #f4f4f4;padding:20px;text-align: center;margin-bottom:10px;\u0022\u003E\n\u003Cp style=\u0022margin-bottom: 30px;font-size:14px;\u0022\u003EWe attempted to charge the \u003Cspan style=\u0022text-transform:uppercase;\u0022\u003E[message:commerce-dunning-message-card:card-type]\u003C\/span\u003E ending in [message:commerce-dunning-message-card:card-number] for [message:commerce-dunning-message-order:commerce_order_total] on [message:commerce-dunning-message-order:changed], but the payment was declined.\u003C\/p\u003E\n\u003Cp style=\u0022font-size:14px;\u0022\u003E\u003Cstrong\u003EAffected orders:\u003C\/strong\u003E\u003C\/p\u003E\n\u003Ctable style=\u0022background: #ddd;width:100%;margin-bottom: 50px;\u0022\u003E\u003Ctr\u003E\u003Ctd style=\u0022padding:20px;font-size:18px;text-align:left;\u0022\u003E\n                    \u003Ca href=\u0022[message:commerce-dunning-message-order:customer-url]\u0022\u003E[message:commerce-dunning-message-order]\u003C\/a\u003E\n                  \u003C\/td\u003E\n\u003Ctd style=\u0022padding:20px;font-size:18px;text-align:right;\u0022\u003E\n                    [message:commerce-dunning-message-order:commerce_order_total]\n                  \u003C\/td\u003E\n\u003C\/tr\u003E\u003C\/table\u003E\u003Cp\u003E              !dunning-context-info\u003C\/p\u003E\n\u003Cp style=\u0022margin-bottom: 30px;\u0022\u003E\u003Ca href=\u0022[site:url]user\/[message:commerce-dunning-message-order:uid]\/cards\u0022 class=\u0022button\u0022 style=\u0022background:#009cd5; display: inline-block;padding:15px 30px;color:#fff;text-decoration:none;font-weight: normal;\u0022\u003EREVIEW PAYMENT INFORMATION\u003C\/a\u003E\u003C\/p\u003E\n\u003C\/div\u003E\n\u003Cp style=\u0022font-size:12px;\u0022\u003E\u003Cstrong\u003EHave questions?\u003C\/strong\u003E \u003Ca href=\u0022[site:url]\u0022 style=\u0022color:#009cd5\u0022\u003EContact Us \u0026gt;\u0026gt;\u003C\/a\u003E\u003C\/p\u003E\n\u003C\/td\u003E\n\u003Ctd style=\u0022width:5%;\u0022\u003E\u003C\/td\u003E\n\u003C\/tr\u003E\u003C\/table\u003E\u003C\/td\u003E\n\u003C\/tr\u003E\u003C\/tbody\u003E\u003C\/table\u003E"
+        }
+      ]
+    },
+    "dunning_message_text_next" : { "und" : [
+        {
+          "value" : "\u003Cp style=\u0022margin-bottom: 30px;font-size:18px;\u0022\u003EWe will attempt to charge your card again \u003Cbr \/\u003E\u003Cstrong\u003E!charge-attempt-date\u003C\/strong\u003E.\u003C\/p\u003E",
+          "format" : "full_html",
+          "safe_value" : "\u003Cp style=\u0022margin-bottom: 30px;font-size:18px;\u0022\u003EWe will attempt to charge your card again \u003Cbr \/\u003E\u003Cstrong\u003E!charge-attempt-date\u003C\/strong\u003E.\u003C\/p\u003E\n"
+        }
+      ]
+    },
+    "dunning_message_text_final" : { "und" : [
+        {
+          "value" : "\u003Cp style=\u0022font-style:italic;font-size:13px;margin:0 0 10px;text-align: center;\u0022\u003E*Final Notice: Please update your billing information to avoid cancellation*\u003C\/p\u003E\r\n\u003Cp style=\u0022margin-bottom: 30px;font-size:18px;\u0022\u003EWe will attempt to charge your card one last time again \u003Cbr \/\u003E\u003Cstrong\u003E!charge-attempt-date\u003C\/strong\u003E.\u003C\/p\u003E",
+          "format" : "full_html",
+          "safe_value" : "\u003Cp style=\u0022font-style:italic;font-size:13px;margin:0 0 10px;text-align: center;\u0022\u003E*Final Notice: Please update your billing information to avoid cancellation*\u003C\/p\u003E\n\u003Cp style=\u0022margin-bottom: 30px;font-size:18px;\u0022\u003EWe will attempt to charge your card one last time again \u003Cbr \/\u003E\u003Cstrong\u003E!charge-attempt-date\u003C\/strong\u003E.\u003C\/p\u003E\n"
+        }
+      ]
+    },
+    "dunning_message_text_terminated" : { "und" : [
+        {
+          "value" : "\u003Cp style=\u0022margin-bottom: 30px;font-size:18px;\u0022\u003EYour service is being terminated.\u003C\/p\u003E",
+          "format" : "full_html",
+          "safe_value" : "\u003Cp style=\u0022margin-bottom: 30px;font-size:18px;\u0022\u003EYour service is being terminated.\u003C\/p\u003E\n"
+        }
+      ]
+    }
+  }');
+  $items['commerce_dunning_no_card'] = entity_import('message_type', '{
+    "name" : "commerce_dunning_no_card",
+    "description" : "Commerce Dunning: no card available",
+    "argument_keys" : [],
+    "argument" : [],
+    "category" : "commerce_dunning_message",
+    "data" : {
+      "token options" : { "clear" : 0 },
+      "purge" : { "override" : 0, "enabled" : 0, "quota" : "", "days" : "" }
+    },
+    "language" : "",
+    "arguments" : null,
+    "message_text" : { "und" : [
+        {
+          "value" : "[[site:name]] Payment failed",
+          "format" : "filtered_html",
+          "safe_value" : "\u003Cp\u003E[[site:name]] Payment failed\u003C\/p\u003E\n"
+        },
+        {
+          "value" : "\u003Ctable style=\u0022border: 1px solid #ccc;font-family:\u0027Open Sans\u0027,\u0027Helvetica Neue\u0027, Helvetica, Arial, sans-serif;\u0022\u003E\r\n  \u003Ctbody\u003E\r\n  \u003Ctr\u003E\r\n    \u003Ctd style=\u0022padding: 5px;\u0022\u003E\r\n      \u003Cdiv class=\u0022header\u0022 style=\u0022background: #eee;padding: 20px;text-align:center;\u0022\u003E\u003Ca href=\u0022[site:url]\u0022\u003E[site:site-logo]\u003C\/a\u003E\u003C\/div\u003E\r\n    \u003C\/td\u003E\r\n  \u003C\/tr\u003E\r\n  \u003Ctr\u003E\r\n    \u003Ctd style=\u0022padding:30px 0;\u0022\u003E\r\n      \u003Ctable style=\u0022width:100%;border:none;\u0022\u003E\r\n        \u003Ctr\u003E\r\n          \u003Ctd style=\u0022width:5%;\u0022\u003E\u003C\/td\u003E\r\n          \u003Ctd\u003E\u003Ch1 style=\u0022text-align: center;margin-bottom:20px;font-weight: normal;font-size:18px;color:#333;\u0022\u003EYour payment was declined.\u003C\/h1\u003E\r\n            \u003Cdiv class=\u0022message\u0022 style=\u0022background: #f4f4f4;padding:20px;text-align: center;margin-bottom:10px;\u0022\u003E\r\n              \u003Cp style=\u0022margin-bottom: 30px;font-size:14px;\u0022\u003EWe attempted to charge [message:commerce-dunning-message-order:commerce_order_total] on [message:commerce-dunning-message-order:changed], your payment information needs to be updated before it can be processed.\u003C\/p\u003E\r\n              \u003Cp style=\u0022font-size:14px;\u0022\u003E\u003Cstrong\u003EAffected orders:\u003C\/strong\u003E\u003C\/p\u003E\r\n              \u003Ctable style=\u0022background: #ddd;width:100%;margin-bottom: 50px;\u0022\u003E\r\n                \u003Ctr\u003E\r\n                  \u003Ctd style=\u0022padding:20px;font-size:18px;text-align:left;\u0022\u003E\r\n                    \u003Ca href=\u0022[message:commerce-dunning-message-order:customer-url]\u0022\u003E[message:commerce-dunning-message-order]\u003C\/a\u003E\r\n                  \u003C\/td\u003E\r\n                  \u003Ctd style=\u0022padding:20px;font-size:18px;text-align:right;\u0022\u003E\r\n                    [message:commerce-dunning-message-order:commerce_order_total]\r\n                  \u003C\/td\u003E\r\n                \u003C\/tr\u003E\r\n              \u003C\/table\u003E\r\n              !dunning-context-info\r\n              \u003Cp style=\u0022margin-bottom: 30px;\u0022\u003E\u003Ca href=\u0022[site:url]user\/[message:commerce-dunning-message-order:uid]\/cards\u0022 class=\u0022button\u0022 style=\u0022background:#009cd5; display: inline-block;padding:15px 30px;color:#fff;text-decoration:none;font-weight: normal;\u0022\u003EREVIEW PAYMENT INFORMATION\u003C\/a\u003E\u003C\/p\u003E\r\n            \u003C\/div\u003E\r\n            \u003Cp style=\u0022font-size:12px;\u0022\u003E\u003Cstrong\u003EHave questions?\u003C\/strong\u003E \u003Ca href=\u0022[site:url]\u0022 style=\u0022color:#009cd5\u0022\u003EContact Us \u003E\u003E\u003C\/a\u003E\u003C\/p\u003E\u003C\/td\u003E\r\n          \u003Ctd style=\u0022width:5%;\u0022\u003E\u003C\/td\u003E\r\n        \u003C\/tr\u003E\r\n      \u003C\/table\u003E\r\n    \u003C\/td\u003E\r\n  \u003C\/tr\u003E\r\n  \u003C\/tbody\u003E\r\n\u003C\/table\u003E",
+          "format" : "full_html",
+          "safe_value" : "\u003Ctable style=\u0022border: 1px solid #ccc;font-family:\u0027Open Sans\u0027,\u0027Helvetica Neue\u0027, Helvetica, Arial, sans-serif;\u0022\u003E\u003Ctbody\u003E\u003Ctr\u003E\u003Ctd style=\u0022padding: 5px;\u0022\u003E\n\u003Cdiv class=\u0022header\u0022 style=\u0022background: #eee;padding: 20px;text-align:center;\u0022\u003E\u003Ca href=\u0022[site:url]\u0022\u003E[site:site-logo]\u003C\/a\u003E\u003C\/div\u003E\n\u003C\/td\u003E\n\u003C\/tr\u003E\u003Ctr\u003E\u003Ctd style=\u0022padding:30px 0;\u0022\u003E\n\u003Ctable style=\u0022width:100%;border:none;\u0022\u003E\u003Ctr\u003E\u003Ctd style=\u0022width:5%;\u0022\u003E\u003C\/td\u003E\n\u003Ctd\u003E\n\u003Ch1 style=\u0022text-align: center;margin-bottom:20px;font-weight: normal;font-size:18px;color:#333;\u0022\u003EYour payment was declined.\u003C\/h1\u003E\n\u003Cdiv class=\u0022message\u0022 style=\u0022background: #f4f4f4;padding:20px;text-align: center;margin-bottom:10px;\u0022\u003E\n\u003Cp style=\u0022margin-bottom: 30px;font-size:14px;\u0022\u003EWe attempted to charge [message:commerce-dunning-message-order:commerce_order_total] on [message:commerce-dunning-message-order:changed], your payment information needs to be updated before it can be processed.\u003C\/p\u003E\n\u003Cp style=\u0022font-size:14px;\u0022\u003E\u003Cstrong\u003EAffected orders:\u003C\/strong\u003E\u003C\/p\u003E\n\u003Ctable style=\u0022background: #ddd;width:100%;margin-bottom: 50px;\u0022\u003E\u003Ctr\u003E\u003Ctd style=\u0022padding:20px;font-size:18px;text-align:left;\u0022\u003E\n                    \u003Ca href=\u0022[message:commerce-dunning-message-order:customer-url]\u0022\u003E[message:commerce-dunning-message-order]\u003C\/a\u003E\n                  \u003C\/td\u003E\n\u003Ctd style=\u0022padding:20px;font-size:18px;text-align:right;\u0022\u003E\n                    [message:commerce-dunning-message-order:commerce_order_total]\n                  \u003C\/td\u003E\n\u003C\/tr\u003E\u003C\/table\u003E\u003Cp\u003E              !dunning-context-info\u003C\/p\u003E\n\u003Cp style=\u0022margin-bottom: 30px;\u0022\u003E\u003Ca href=\u0022[site:url]user\/[message:commerce-dunning-message-order:uid]\/cards\u0022 class=\u0022button\u0022 style=\u0022background:#009cd5; display: inline-block;padding:15px 30px;color:#fff;text-decoration:none;font-weight: normal;\u0022\u003EREVIEW PAYMENT INFORMATION\u003C\/a\u003E\u003C\/p\u003E\n\u003C\/div\u003E\n\u003Cp style=\u0022font-size:12px;\u0022\u003E\u003Cstrong\u003EHave questions?\u003C\/strong\u003E \u003Ca href=\u0022[site:url]\u0022 style=\u0022color:#009cd5\u0022\u003EContact Us \u0026gt;\u0026gt;\u003C\/a\u003E\u003C\/p\u003E\n\u003C\/td\u003E\n\u003Ctd style=\u0022width:5%;\u0022\u003E\u003C\/td\u003E\n\u003C\/tr\u003E\u003C\/table\u003E\u003C\/td\u003E\n\u003C\/tr\u003E\u003C\/tbody\u003E\u003C\/table\u003E"
+        }
+      ]
+    },
+    "dunning_message_text_next" : { "und" : [
+        {
+          "value" : "\u003Cp style=\u0022margin-bottom: 30px;font-size:18px;\u0022\u003EPlease re-enter your credit card information.\u003C\/p\u003E",
+          "format" : "full_html",
+          "safe_value" : "\u003Cp style=\u0022margin-bottom: 30px;font-size:18px;\u0022\u003EPlease re-enter your credit card information.\u003C\/p\u003E\n"
+        }
+      ]
+    },
+    "dunning_message_text_final" : { "und" : [
+        {
+          "value" : "\u003Cp style=\u0022font-style:italic;font-size:13px;margin:0 0 10px;text-align: center;\u0022\u003E*Final Notice: Please update your billing information to avoid cancellation*\u003C\/p\u003E\r\n\u003Cp style=\u0022margin-bottom: 30px;font-size:18px;\u0022\u003EWe will attempt to charge your card one last time again \u003Cbr \/\u003E\u003Cstrong\u003E!charge-attempt-date\u003C\/strong\u003E.\u003C\/p\u003E",
+          "format" : "full_html",
+          "safe_value" : "\u003Cp style=\u0022font-style:italic;font-size:13px;margin:0 0 10px;text-align: center;\u0022\u003E*Final Notice: Please update your billing information to avoid cancellation*\u003C\/p\u003E\n\u003Cp style=\u0022margin-bottom: 30px;font-size:18px;\u0022\u003EWe will attempt to charge your card one last time again \u003Cbr \/\u003E\u003Cstrong\u003E!charge-attempt-date\u003C\/strong\u003E.\u003C\/p\u003E\n"
+        }
+      ]
+    },
+    "dunning_message_text_terminated" : { "und" : [
+        {
+          "value" : "\u003Cp style=\u0022margin-bottom: 30px;font-size:18px;\u0022\u003EYour service is being terminated.\u003C\/p\u003E",
+          "format" : "full_html",
+          "safe_value" : "\u003Cp style=\u0022margin-bottom: 30px;font-size:18px;\u0022\u003EYour service is being terminated.\u003C\/p\u003E\n"
+        }
+      ]
+    }
+  }');
+  return $items;
+}
+
+/**
+ * Implements hook_message_presave().
+ */
+function commerce_dunning_defaults_message_presave($message) {
+  $message_types = array(
+    'commerce_dunning_hard_declined_card',
+    'commerce_dunning_soft_declined_card',
+    'commerce_dunning_no_card'
+  );
+  if (!empty($message->mid) || !in_array($message->type, $message_types)) {
+    return;
+  }
+  _commerce_dunning_defaults_contextual_info($message);
+}
+
+/**
+ * Adds the appropriate Dunning contextual information to a message.
+ */
+function _commerce_dunning_defaults_contextual_info(Message $message) {
+  $message_wrapper = entity_metadata_wrapper('message', $message);
+  $order = $message_wrapper->commerce_dunning_message_order->value();
+  $charge_attempts = commerce_dunning_get_next_charge_attempt_dates($order->order_id);
+  $order_in_dunning = commerce_dunning_order_has_revision_with_status($order, array('cardonfile_payment_error_hard_decline', 'cardonfile_payment_failed_soft_decline'));
+
+  $langcode = LANGUAGE_NONE;
+  if (module_exists('locale')) {
+    // Locale module is enabled, so Message will force the usage of a specific
+    // language. By setting the language code to NULL, we let Message to use
+    // the current language.
+    $langcode = NULL;
+  }
+
+  if (count($charge_attempts) > 2) {
+    // If we have more than two scheduled charge attempts left, we can just
+    // tell the customer when will the next charge attempt be.
+    // It's important to know whether the order is in the Dunning process
+    // currently, because if it is, we need to use the second date from the
+    // scheduled charge attempts, because the first one belongs to the charge
+    // attempt that we have just done, but the scheduled rules task is not
+    // entirely finished yet, so it's still there.
+    $charge_attempts_delta = $order_in_dunning ? 1 : 0;
+    $message->arguments['!charge-attempt-date'] = format_date($charge_attempts[$charge_attempts_delta]);
+    $message->arguments['!dunning-context-info'] = $message->getText($langcode, array('field name' => COMMERCE_DUNNING_DEFAULTS_MESSAGE_TYPE_TEXT_ACTION_NEXT_FIELD));
+  }
+  if (count($charge_attempts) == 2) {
+    // If we have exactly two scheduled charge attempts left, we tell the
+    // customer that the next charge attempt will be the last one.
+    // Similarly to the previous case, it's important to differentiate when we
+    // are in the Dunning process or not, to be able to return the correct date.
+    $charge_attempts_delta = $order_in_dunning ? 1 : 0;
+    $message->arguments['!charge-attempt-date'] = format_date($charge_attempts[$charge_attempts_delta]);
+    $message->arguments['!dunning-context-info'] = $message->getText($langcode, array('field name' => COMMERCE_DUNNING_DEFAULTS_MESSAGE_TYPE_TEXT_ACTION_FINAL_FIELD));
+  }
+  if (count($charge_attempts) == 1) {
+    // When there is only one scheduled charge attempt left, that's the last
+    // one, so we tell the customer that their service is being terminated.
+    $message->arguments['!dunning-context-info'] = $message->getText($langcode, array('field name' => COMMERCE_DUNNING_DEFAULTS_MESSAGE_TYPE_TEXT_TERMINATED_FIELD));
+  }
+}
+
+/**
+ * Implements hook_field_attach_create_bundle().
+ */
+function commerce_dunning_defaults_field_attach_create_bundle($entity_type, $bundle) {
+  $message_types = array(
+    'commerce_dunning_hard_declined_card',
+    'commerce_dunning_soft_declined_card',
+    'commerce_dunning_no_card'
+  );
+  if ($entity_type != 'message' || !in_array($bundle, $message_types)) {
+    return;
+  }
+
+  $bundle_settings = field_bundle_settings('message', $bundle);
+
+  $bundle_settings['extra_fields']['display']['message__dunning_message_text_next__0'] = array(
+    'message_notify_email_subject' => array('visible' => FALSE, 'weight' => 0),
+    'message_notify_email_body' => array('visible' => FALSE, 'weight' => 0),
+  );
+  $bundle_settings['extra_fields']['display']['message__dunning_message_text_final__0'] = array(
+    'message_notify_email_subject' => array('visible' => FALSE, 'weight' => 0),
+    'message_notify_email_body' => array('visible' => FALSE, 'weight' => 0),
+  );
+  $bundle_settings['extra_fields']['display']['message__dunning_message_text_terminated__0'] = array(
+    'message_notify_email_subject' => array('visible' => FALSE, 'weight' => 0),
+    'message_notify_email_body' => array('visible' => FALSE, 'weight' => 0),
+  );
+
+  field_bundle_settings('message', $bundle, $bundle_settings);
+}
+
+/**
+ * Loads cards associated to other payment methods than Dunning Testing.
+ */
+function commerce_dunning_testing_load_cards_with_other_payment_methods() {
+  $query = new EntityFieldQuery();
+  $query->entityCondition('entity_type', 'commerce_cardonfile')
+    ->propertyCondition('payment_method', 'commerce_dunning_testing_payment', '<>');
+  $result = $query->execute();
+
+  if (isset($result['commerce_cardonfile'])) {
+    return commerce_cardonfile_load_multiple(array_keys($result['commerce_cardonfile']));
+  }
+  return NULL;
+}

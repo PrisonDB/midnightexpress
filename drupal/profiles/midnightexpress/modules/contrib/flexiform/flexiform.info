@@ -1,0 +1,59 @@
+name = "Flexible Forms"
+description = "Build forms based on multiple entities."
+core = 7.x
+
+dependencies[] = entity
+dependencies[] = views
+
+files[] = flexiform_submission.admin.inc
+files[] = flexiform_submission.entity.inc
+files[] = flexiform.admin.inc
+files[] = flexiform.entity.inc
+files[] = includes/flexiform.flexiform.inc
+
+; Displays
+files[] = includes/flexiform.display.inc
+files[] = includes/display/null.display.inc
+files[] = includes/display/page.display.inc
+files[] = includes/display/add_page.display.inc
+files[] = includes/display/edit_page.display.inc
+files[] = includes/display/edit_pane.display.inc
+files[] = includes/display/user_category.display.inc
+
+; Builders
+files[] = includes/flexiform.builder.inc
+files[] = includes/builder/flexiform.builder.inc
+files[] = includes/builder/entity_form.builder.inc
+
+; Elements
+files[] = includes/flexiform.element.inc
+files[] = includes/flexiform.element_repeatable.inc
+files[] = includes/element/flexiform.element.inc
+files[] = includes/element/field.element.inc
+files[] = includes/element/node_title.element.inc
+files[] = includes/element/node_promote.element.inc
+files[] = includes/element/node_status.element.inc
+files[] = includes/element/node_sticky.element.inc
+files[] = includes/element/custom_html.element.inc
+
+; Plugins and Views
+files[] = views/flexiform.views.inc
+files[] = views/flexiform_submission_handler_link_field.inc
+files[] = views/flexiform_submission_handler_delete_link_field.inc
+files[] = views/flexiform_submission_handler_edit_link_field.inc
+files[] = views/flexiform_submission_handler_flexiform_submission_operations_field.inc
+
+
+; Information added by drush on 2014-02-04
+version = "7.x-1.0-beta5+4-dev"
+core = "7.x"
+project = "flexiform"
+datestamp = "1391524722"
+
+
+; Information added by Drupal.org packaging script on 2014-03-04
+version = "7.x-1.0-beta6"
+core = "7.x"
+project = "flexiform"
+datestamp = "1393949915"
+

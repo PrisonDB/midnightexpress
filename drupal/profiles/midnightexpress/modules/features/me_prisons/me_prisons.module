@@ -1,0 +1,7 @@
+<?php
+/**
+ * @file
+ * Code for the ME Prisons feature.
+ */
+
+include_once 'me_prisons.features.inc';

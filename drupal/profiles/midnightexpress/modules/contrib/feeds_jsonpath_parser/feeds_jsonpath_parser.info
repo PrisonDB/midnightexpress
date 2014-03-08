@@ -1,0 +1,14 @@
+name = JSONPath Parser
+description = Parse a JSON document using JSONPath.
+files[] = tests/feeds_jsonpath_parser.test
+files[] = FeedsJSONPathParser.inc
+package = Feeds
+dependencies[] = feeds
+core = 7.x
+
+; Information added by drupal.org packaging script on 2013-09-30
+version = "7.x-1.0-beta2+11-dev"
+core = "7.x"
+project = "feeds_jsonpath_parser"
+datestamp = "1380578352"
+

@@ -1,0 +1,225 @@
+<?php
+
+/**
+ * @file
+ * Install, update, and uninstall functions for Commerce Dunning Defaults.
+ */
+
+/**
+ * Implements hook_enable().
+ */
+function commerce_dunning_defaults_enable() {
+  // Make sure we're in a non-cached environment.
+  entity_info_cache_clear();
+  field_cache_clear();
+  // Ensure that all the fields and their instances we need are exist.
+  commerce_dunning_defaults_enable_ensure_fields();
+}
+
+/**
+ * Ensures all the fields that Commerce Dunning Defaults needs are in place.
+ */
+function commerce_dunning_defaults_enable_ensure_fields() {
+  // Defining the fields. The following array structure is completely made up
+  // (except the sub-arrays under key 'field definition' and 'field instance'),
+  // just to make it easy to create the field bases and instances by traversing
+  // this big array that gives a nice overview in the same time.
+  // Note that the bundle is not defined in the field instance sub-array, as we
+  // would possibly like to create instances for more than one bundle. So we
+  // instead have a standalone array with the list of the bundles and we will
+  // use that for creating multiple instances — by injecting the bundle name to
+  // the field instance definition along the way.
+  $fields = array(
+    COMMERCE_DUNNING_DEFAULTS_MESSAGE_TYPE_TEXT_FIELD => array(
+      // We don't need field definition for this particular field, it's provided
+      // by Message module.
+      'field definition' => array(),
+      'field instance' => array(
+        'field_name' => COMMERCE_DUNNING_DEFAULTS_MESSAGE_TYPE_TEXT_FIELD,
+        'entity_type' => 'message_type',
+        'label' => t('Message text'),
+        'description' => t('This is the text of all messages of this type.'),
+        'required' => TRUE,
+        'settings' => array(
+          'text_processing' => 1,
+          // Mark that this field can be rendered using Message::getText().
+          'message_text' => TRUE,
+        ),
+      ),
+      'bundles' => array(
+        'commerce_dunning_message',
+      ),
+    ),
+    COMMERCE_DUNNING_DEFAULTS_MESSAGE_TYPE_TEXT_ACTION_NEXT_FIELD => array(
+      'field definition' => array(
+        'field_name' => COMMERCE_DUNNING_DEFAULTS_MESSAGE_TYPE_TEXT_ACTION_NEXT_FIELD,
+        'type' => 'text_long',
+        'entity_types' => array('message_type'),
+        'cardinality' => 1,
+        'translatable' => TRUE,
+        'locked' => TRUE,
+        'settings' => array(
+          // Mark that this field can be rendered using Message::getText().
+          'message_text' => TRUE,
+        ),
+      ),
+      'field instance' => array(
+        'field_name' => COMMERCE_DUNNING_DEFAULTS_MESSAGE_TYPE_TEXT_ACTION_NEXT_FIELD,
+        'entity_type' => 'message_type',
+        'label' => t('Text describing next action'),
+        'description' => t('This is the text that describes the next action in the Dunning process.'),
+        'required' => TRUE,
+        'settings' => array(
+          'text_processing' => 1,
+          // Mark that this field can be rendered using Message::getText().
+          'message_text' => TRUE,
+        ),
+      ),
+      'bundles' => array(
+        'commerce_dunning_message',
+      ),
+    ),
+    COMMERCE_DUNNING_DEFAULTS_MESSAGE_TYPE_TEXT_ACTION_FINAL_FIELD => array(
+      'field definition' => array(
+        'field_name' => COMMERCE_DUNNING_DEFAULTS_MESSAGE_TYPE_TEXT_ACTION_FINAL_FIELD,
+        'type' => 'text_long',
+        'entity_types' => array('message_type'),
+        'cardinality' => 1,
+        'translatable' => TRUE,
+        'locked' => TRUE,
+        'settings' => array(
+          // Mark that this field can be rendered using Message::getText().
+          'message_text' => TRUE,
+        ),
+      ),
+      'field instance' => array(
+        'field_name' => COMMERCE_DUNNING_DEFAULTS_MESSAGE_TYPE_TEXT_ACTION_FINAL_FIELD,
+        'entity_type' => 'message_type',
+        'label' => t('Text describing final action'),
+        'description' => t('This is the text that describes the final action in the Dunning process.'),
+        'required' => TRUE,
+        'settings' => array(
+          'text_processing' => 1,
+          // Mark that this field can be rendered using Message::getText().
+          'message_text' => TRUE,
+        ),
+      ),
+      'bundles' => array(
+        'commerce_dunning_message',
+      ),
+    ),
+    COMMERCE_DUNNING_DEFAULTS_MESSAGE_TYPE_TEXT_TERMINATED_FIELD => array(
+      'field definition' => array(
+        'field_name' => COMMERCE_DUNNING_DEFAULTS_MESSAGE_TYPE_TEXT_TERMINATED_FIELD,
+        'type' => 'text_long',
+        'entity_types' => array('message_type'),
+        'cardinality' => 1,
+        'translatable' => TRUE,
+        'locked' => TRUE,
+        'settings' => array(
+          // Mark that this field can be rendered using Message::getText().
+          'message_text' => TRUE,
+        ),
+      ),
+      'field instance' => array(
+        'field_name' => COMMERCE_DUNNING_DEFAULTS_MESSAGE_TYPE_TEXT_TERMINATED_FIELD,
+        'entity_type' => 'message_type',
+        'label' => t('Text describing service termination'),
+        'description' => t('This is the text that describes the service termination.'),
+        'required' => TRUE,
+        'settings' => array(
+          'text_processing' => 1,
+          // Mark that this field can be rendered using Message::getText().
+          'message_text' => TRUE,
+        ),
+      ),
+      'bundles' => array(
+        'commerce_dunning_message',
+      ),
+    ),
+    COMMERCE_DUNNING_DEFAULTS_MESSAGE_ORDER_REFERENCE_FIELD => array(
+      'field definition' => array(
+        'field_name' => COMMERCE_DUNNING_DEFAULTS_MESSAGE_ORDER_REFERENCE_FIELD,
+        'type' => 'entityreference',
+        'module' => 'entityreference',
+        'translatable' => FALSE,
+        'settings' => array(
+          'target_type' => 'commerce_order',
+          'handler' => 'base',
+          'handler_settings' => array(),
+        ),
+      ),
+      'field instance' => array(
+        'field_name' => COMMERCE_DUNNING_DEFAULTS_MESSAGE_ORDER_REFERENCE_FIELD,
+        'entity_type' => 'message',
+        'label' => t('Order'),
+        'required' => TRUE,
+        'settings' => array(),
+        'display' => array(),
+        'widget' => array(
+          'type' => 'entityreference_autocomplete',
+          'module' => 'entityreference',
+        ),
+      ),
+      'bundles' => array(
+        'commerce_dunning_hard_declined_card',
+        'commerce_dunning_soft_declined_card',
+        'commerce_dunning_no_card'
+      ),
+    ),
+    COMMERCE_DUNNING_DEFAULTS_MESSAGE_CARD_REFERENCE_FIELD => array(
+      'field definition' => array(
+        'field_name' => COMMERCE_DUNNING_DEFAULTS_MESSAGE_CARD_REFERENCE_FIELD,
+        'type' => 'entityreference',
+        'module' => 'entityreference',
+        'translatable' => FALSE,
+        'settings' => array(
+          'target_type' => 'commerce_cardonfile',
+          'handler' => 'base',
+          'handler_settings' => array(),
+        ),
+      ),
+      'field instance' => array(
+        'field_name' => COMMERCE_DUNNING_DEFAULTS_MESSAGE_CARD_REFERENCE_FIELD,
+        'entity_type' => 'message',
+        'label' => t('Card'),
+        'required' => FALSE,
+        'settings' => array(),
+        'display' => array(),
+        'widget' => array(
+          'type' => 'entityreference_autocomplete',
+          'module' => 'entityreference',
+        ),
+      ),
+      'bundles' => array(
+        'commerce_dunning_hard_declined_card',
+        'commerce_dunning_soft_declined_card',
+      ),
+    ),
+  );
+
+  foreach ($fields as $field) {
+    if (!empty($field['field definition'])) {
+      if (field_info_field($field['field definition']['field_name'])) {
+        // Update the field if it already exists.
+        field_update_field($field['field definition']);
+      }
+      else {
+        // Create the field if it doesn't exist yet.
+        field_create_field($field['field definition']);
+      }
+    }
+    foreach ($field['bundles'] as $bundle) {
+      $field_instance = $field['field instance'];
+      $field_instance['bundle'] = $bundle;
+      if (field_info_instance($field_instance['entity_type'], $field_instance['field_name'], $bundle)) {
+        // Update the field instance if it already exists.
+        field_update_instance($field_instance);
+      }
+      else {
+        // Create the field instance if it doesn't exist yet.
+        field_create_instance($field_instance);
+      }
+    }
+  }
+}
